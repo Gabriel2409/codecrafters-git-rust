@@ -4,8 +4,12 @@ pub type Result<T> = core::result::Result<T, Error>;
 
 #[derive(Debug, From)]
 pub enum Error {
+    NoArgs,
+    UnknownCommand(String),
+    UnknownArgument(String),
     InvalidNbArgs {
         expected: usize,
+
         got: usize,
     },
     // -- Externals
