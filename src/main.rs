@@ -1,21 +1,19 @@
 #[allow(unused_imports)]
 use std::env;
 #[allow(unused_imports)]
-use std::fs;
+mod git_init;
+use git_init::git_init;
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
     // Uncomment this block to pass the first stage
     let args: Vec<String> = env::args().collect();
-    if args[1] == "init" {
-        fs::create_dir(".git").unwrap();
-        fs::create_dir(".git/objects").unwrap();
-        fs::create_dir(".git/refs").unwrap();
-        fs::write(".git/HEAD", "ref: refs/heads/main\n").unwrap();
-        println!("Initialized git directory")
-    } else {
-        println!("unknown command: {}", args[1])
+
+    match args[1].as_str() {
+        "init" => git_init(&args),
+        "cat-file" => match args[2].as_str() {
+            "-p" => println!("IMPLEMENTED"),
+            _ => eprintln!("unknown command: {}", args[2]),
+        },
+        _ => eprintln!("unknown command: {}", args[1]),
     }
 }
