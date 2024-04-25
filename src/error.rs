@@ -7,6 +7,7 @@ pub enum Error {
     NoArgs,
     UnknownCommand(String),
     UnknownArgument(String),
+    InvalidHash(String),
     InvalidNbArgs {
         expected: usize,
 
