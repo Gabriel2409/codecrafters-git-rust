@@ -13,6 +13,7 @@ pub enum Error {
 
         got: usize,
     },
+    InvalidGitObject,
     // -- Externals
     #[from]
     Io(std::io::Error),

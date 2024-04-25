@@ -1,5 +1,5 @@
 use crate::constants::GIT_DIR;
-use crate::zlib_decompress::decompress;
+use crate::zlib_decompress::{decompress, GitObject};
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 
@@ -15,7 +15,7 @@ pub fn git_cat_file(args: &[String]) -> Result<()> {
         "-p" => {
             let obj_dir: PathBuf = [GIT_DIR, "objects"].iter().collect();
             let hash_loc = get_hash_object_loc(obj_dir, &args[3])?;
-            let content = decompress(hash_loc)?;
+            let GitObject { content, .. } = decompress(hash_loc)?;
             print!("{content}");
         }
         x => {
