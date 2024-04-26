@@ -1,7 +1,11 @@
 use flate2::bufread;
+use sha1::{Digest, Sha1};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
+use std::io::Seek;
+use std::io::SeekFrom;
+use std::path::Path;
 use std::path::PathBuf;
 
 use crate::{Error, Result};
@@ -59,6 +63,38 @@ impl GitObject {
             size,
             content,
             hash: hash.to_string(),
+        })
+    }
+
+    pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<GitObject> {
+        let file = File::open(&file_path)?;
+
+        // TODO: probably a bad idea, files can be pretty big
+        let size = file.metadata()?.len() as u32;
+
+        let mut reader = BufReader::new(file);
+
+        let mut content = String::new();
+        reader.read_to_string(&mut content)?;
+        reader.seek(SeekFrom::Start(0))?;
+
+        let header = format!("blob {}", size);
+
+        let mut bytes = header.as_bytes().to_vec();
+        bytes.push(0);
+
+        reader.read_to_end(&mut bytes)?;
+        let mut hasher = Sha1::new();
+        hasher.update(bytes);
+        let digest = hasher.finalize();
+        // let mut digest = Sha1::digest(&mut content); // other solution
+        let hash = format!("{digest:x}");
+
+        Ok(GitObject {
+            type_obj: "blob".to_string(),
+            hash,
+            content,
+            size,
         })
     }
 }
