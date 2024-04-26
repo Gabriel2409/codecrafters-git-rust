@@ -59,6 +59,7 @@ impl GitObject {
 
         match type_obj {
             "tree" => {
+                let mut content = String::new();
                 let mut buf_20 = vec![0; 20];
                 let mut content_bytes = Vec::new();
                 reader.read_until(0, &mut content_bytes)?;
@@ -71,7 +72,12 @@ impl GitObject {
                 }
 
                 reader.read_until(0, &mut content_bytes)?;
-                dbg!(&content);
+                Ok(GitObject {
+                    type_obj: type_obj.to_string(),
+                    size,
+                    content,
+                    hash: hash.to_string(),
+                })
             }
             _ => {
                 let mut content = String::new();
