@@ -2,12 +2,14 @@ mod error;
 mod git_cat_file;
 mod git_hash_object;
 mod git_init;
+mod git_ls_tree;
 mod git_object;
 
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
 use git_hash_object::git_hash_object;
 use git_init::git_init;
+use git_ls_tree::git_ls_tree;
 
 use clap::{Parser, Subcommand};
 
@@ -68,6 +70,8 @@ enum Commands {
     },
     /// List the contents of a tree object
     LsTree {
+        #[arg(long, help = "Only print the name of the files")]
+        name_only: bool,
         #[arg(help = "hash corresponding to a given git <object>")]
         hash: String,
     },
@@ -97,7 +101,7 @@ fn main() -> Result<()> {
             )?;
         }
         Commands::HashObject { write_obj, file } => git_hash_object(*write_obj, file)?,
-        Commands::LsTree { .. } => todo!(),
+        Commands::LsTree { name_only, hash } => git_ls_tree(*name_only, hash)?,
     };
     Ok(())
 }

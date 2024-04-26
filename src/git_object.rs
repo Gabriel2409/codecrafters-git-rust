@@ -13,11 +13,12 @@ use std::path::PathBuf;
 use crate::{Error, Result};
 
 #[derive(Debug)]
-pub struct GitObjectAttributes {
-    hash: String,
-    type_obj: String, // could make an enum instead
-    permission: String,
-    name: String,
+pub struct TreeAttributes {
+    pub hash: String,
+    pub type_obj: String, // could make an enum instead
+    pub permission: u32,
+    pub size: usize,
+    pub name: String,
 }
 
 #[derive(Debug)]
@@ -57,39 +58,40 @@ impl GitObject {
             .parse::<usize>()
             .map_err(|_| Error::InvalidGitObject)?;
 
+        let mut content = String::new();
         match type_obj {
+            // content is actually just permission name hash for trees
             "tree" => {
-                let mut content = String::new();
                 let mut buf_20 = vec![0; 20];
                 let mut content_bytes = Vec::new();
-                reader.read_until(0, &mut content_bytes)?;
-                content_bytes.pop(); // no need for null byte
-                content.push_str(&String::from_utf8_lossy(&content_bytes));
+                loop {
+                    reader.read_until(0, &mut content_bytes)?;
+                    if content_bytes.is_empty() {
+                        break;
+                    }
+                    content_bytes.pop(); // no need for null byte
+                    content.push_str(&String::from_utf8_lossy(&content_bytes));
+                    content.push(' ');
 
-                reader.read_exact(&mut buf_20)?;
-                for byte in buf_20.iter() {
-                    content.push_str(&format!("{:02x}", byte)); // Format each byte with leading zeros
+                    reader.read_exact(&mut buf_20)?;
+                    for byte in buf_20.iter() {
+                        content.push_str(&format!("{:02x}", byte)); // Format each byte with leading zeros
+                    }
+                    content.push('\n');
+
+                    content_bytes.clear();
                 }
-
-                reader.read_until(0, &mut content_bytes)?;
-                Ok(GitObject {
-                    type_obj: type_obj.to_string(),
-                    size,
-                    content,
-                    hash: hash.to_string(),
-                })
             }
             _ => {
-                let mut content = String::new();
                 reader.read_to_string(&mut content)?;
-                Ok(GitObject {
-                    type_obj: type_obj.to_string(),
-                    size,
-                    content,
-                    hash: hash.to_string(),
-                })
             }
         }
+        Ok(GitObject {
+            type_obj: type_obj.to_string(),
+            size,
+            content,
+            hash: hash.to_string(),
+        })
     }
 
     pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<GitObject> {
@@ -135,7 +137,7 @@ impl GitObject {
 
         match self.type_obj.as_ref() {
             "tree" => todo!(),
-            _ => {
+            "blob" => {
                 let header = format!("blob {}", self.size);
 
                 let mut bytes = header.as_bytes().to_vec();
@@ -148,34 +150,44 @@ impl GitObject {
 
                 Ok(())
             }
+            _ => todo!(),
         }
     }
 
-    // pub fn get_tree_links(&self) -> Result<Vec<GitObjectAttributes>> {
-    //     if self.type_obj != "tree".to_string() {
-    //         Err(Error::NotATreeGitObject(self.hash.to_string()))?;
-    //     }
-    //
-    //     let linked = self
-    //         .content
-    //         .lines()
-    //         .try_fold(Vec::new(), |mut attributes, line| {
-    //             let parts = line.trim().split_whitespace().collect::<Vec<&str>>();
-    //             match parts.len() {
-    //                 4 => {
-    //                     attributes.push(GitObjectAttributes {
-    //                         permission: parts[0].to_string(),
-    //                         type_obj: parts[1].to_string(),
-    //                         hash: parts[2].to_string(),
-    //                         name: parts[3].to_string(),
-    //                     });
-    //                     Ok(attributes)
-    //                 }
-    //                 _ => Err(Error::InvalidGitObject),
-    //             }
-    //         })?;
-    //     Ok(linked)
-    // }
+    pub fn get_tree_attributes(&self) -> Result<Vec<TreeAttributes>> {
+        if self.type_obj != "tree".to_string() {
+            Err(Error::NotATreeGitObject(self.hash.to_string()))?;
+        }
+
+        let linked = self
+            .content
+            .lines()
+            .try_fold(Vec::new(), |mut attributes, line| {
+                let parts = line.split_whitespace().collect::<Vec<&str>>();
+                match parts.len() {
+                    3 => {
+                        let permission = parts[0].to_string();
+                        let name = parts[1].to_string();
+                        let hash = parts[2].to_string();
+
+                        let GitObject { type_obj, size, .. } = GitObject::from_hash(&hash)?;
+
+                        attributes.push(TreeAttributes {
+                            permission: permission
+                                .parse::<u32>()
+                                .map_err(|_| Error::InvalidGitObject)?,
+                            name,
+                            type_obj,
+                            hash,
+                            size,
+                        });
+                        Ok(attributes)
+                    }
+                    _ => Err(Error::InvalidGitObject),
+                }
+            })?;
+        Ok(linked)
+    }
 }
 
 // #[cfg(test)]

@@ -14,7 +14,19 @@ pub fn git_cat_file(
     if exit_with_zero_status_if_exists {
         println!("Valid object");
     } else if pretty_print {
-        print!("{}", git_obj.content);
+        match git_obj.type_obj.as_ref() {
+            "tree" => {
+                // NOTE: I could implement display instead for TreeAttributes
+                let git_attrs = git_obj.get_tree_attributes()?;
+                for git_attr in git_attrs {
+                    println!(
+                        "{:0>6} {} {}\t{}",
+                        git_attr.permission, git_attr.type_obj, git_attr.hash, git_attr.name
+                    );
+                }
+            }
+            _ => print!("{}", git_obj.content),
+        }
     } else if size {
         println!("{}", git_obj.size)
     } else if type_obj {
