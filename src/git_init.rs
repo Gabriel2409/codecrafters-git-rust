@@ -1,6 +1,6 @@
 use std::fs;
 
-use crate::{Error, Result};
+use crate::Result;
 
 pub fn git_init() -> Result<()> {
     fs::create_dir(".git")?;

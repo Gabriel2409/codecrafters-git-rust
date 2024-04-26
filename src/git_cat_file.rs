@@ -1,27 +1,37 @@
 use crate::constants::GIT_DIR;
-use crate::zlib_decompress::{decompress, GitObject};
+use crate::zlib_decompress::decompress;
 use crate::{Error, Result};
 use std::path::{Path, PathBuf};
 
-pub fn git_cat_file(args: &[String]) -> Result<()> {
-    let nb_args = args.len();
-    if nb_args != 4 {
-        return Err(Error::InvalidNbArgs {
-            expected: 4,
-            got: nb_args,
-        });
-    }
-    match args[2].as_str() {
-        "-p" => {
-            let obj_dir: PathBuf = [GIT_DIR, "objects"].iter().collect();
-            let hash_loc = get_hash_object_loc(obj_dir, &args[3])?;
-            let GitObject { content, .. } = decompress(hash_loc)?;
-            print!("{content}");
+pub fn git_cat_file(
+    pretty_print: bool,
+    exit_with_zero_status_if_exists: bool,
+    type_obj: bool,
+    size: bool,
+    hash: &str,
+) -> Result<()> {
+    let obj_dir: PathBuf = [GIT_DIR, "objects"].iter().collect();
+    let hash_loc = get_hash_object_loc(obj_dir, hash)?;
+
+    if exit_with_zero_status_if_exists {
+        if hash_loc.exists() {
+            println!("Valid object");
+            return Ok(());
         }
-        x => {
-            return Err(Error::UnknownArgument(x.to_owned()));
-        }
+        Err(Error::InvalidGitObject)?;
     }
+
+    let git_obj = decompress(hash_loc)?;
+
+    // TODO: would be better with an enum
+    if pretty_print {
+        print!("{}", git_obj.content);
+    } else if size {
+        println!("{}", git_obj.size)
+    } else if type_obj {
+        println!("{}", git_obj.type_obj)
+    }
+
     Ok(())
 
     // let object_location = get_object_location(&args[3]).unwrap();

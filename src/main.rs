@@ -7,7 +7,6 @@ mod zlib_decompress;
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
 use git_init::git_init;
-use std::env;
 
 use clap::{Parser, Subcommand};
 
@@ -68,7 +67,22 @@ fn main() -> Result<()> {
     // matches just as you would the top level cmd
     match &cli.command {
         Commands::Init => git_init()?,
-        Commands::CatFile { .. } => git_cat_file(&vec!["".to_string()])?,
+        // TODO: There must be a better way. Can we have incompatible args as an enum?
+        Commands::CatFile {
+            pretty_print,
+            exit_with_zero_status_if_exists,
+            type_obj,
+            size,
+            hash,
+        } => {
+            git_cat_file(
+                *pretty_print,
+                *exit_with_zero_status_if_exists,
+                *type_obj,
+                *size,
+                hash,
+            )?;
+        }
     };
     Ok(())
 }

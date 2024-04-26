@@ -7,7 +7,7 @@ use std::path::Path;
 use crate::{Error, Result};
 
 pub struct GitObject {
-    pub obj_type: String,
+    pub type_obj: String,
     pub size: u32,
     pub content: String,
 }
@@ -22,7 +22,7 @@ pub fn decompress<P: AsRef<Path>>(file_path: P) -> Result<GitObject> {
     let full_content = String::from_utf8_lossy(&decompressed_content).to_string();
 
     let mut space_iter = full_content.splitn(2, |c| c == ' ');
-    let obj_type = space_iter
+    let type_obj = space_iter
         .next()
         .ok_or_else(|| Error::InvalidGitObject)?
         .to_string();
@@ -44,7 +44,7 @@ pub fn decompress<P: AsRef<Path>>(file_path: P) -> Result<GitObject> {
         .to_string();
 
     Ok(GitObject {
-        obj_type,
+        type_obj,
         size,
         content,
     })
