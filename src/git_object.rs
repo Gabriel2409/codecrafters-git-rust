@@ -1,10 +1,11 @@
-use flate2::bufread;
 use sha1::{Digest, Sha1};
+use std::fs::create_dir_all;
 use std::fs::File;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Seek;
 use std::io::SeekFrom;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -32,7 +33,7 @@ impl GitObject {
         let mut decompressed_content = Vec::new();
 
         // TODO: could be improved, maybe with read_until \0
-        let mut decoder = bufread::ZlibDecoder::new(input);
+        let mut decoder = flate2::bufread::ZlibDecoder::new(input);
         decoder.read_to_end(&mut decompressed_content)?;
         let full_content = String::from_utf8_lossy(&decompressed_content).to_string();
 
@@ -98,7 +99,24 @@ impl GitObject {
         })
     }
 
-    pub fn write(&self) {
-        println!("WRITING")
+    pub fn write(&self) -> Result<()> {
+        let (subdir, filename) = self.hash.split_at(2);
+
+        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
+
+        let parent = location.parent().ok_or_else(|| Error::InvalidGitObject)?;
+        create_dir_all(parent)?;
+        let output = File::create(location)?;
+
+        let header = format!("blob {}", self.size);
+
+        let mut bytes = header.as_bytes().to_vec();
+        bytes.push(0);
+        bytes.extend(self.content.as_bytes());
+
+        let mut encoder = flate2::write::ZlibEncoder::new(output, flate2::Compression::default());
+        encoder.write_all(&bytes)?;
+
+        Ok(())
     }
 }
