@@ -1,10 +1,12 @@
 mod error;
 mod git_cat_file;
+mod git_hash_object;
 mod git_init;
 mod git_object;
 
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
+use git_hash_object::git_hash_object;
 use git_init::git_init;
 
 use clap::{Parser, Subcommand};
@@ -57,6 +59,13 @@ enum Commands {
         #[arg(help = "hash corresponding to a given git <object>")]
         hash: String,
     },
+    /// Compute object ID and optionally create an object from a file - only implemented for blob
+    HashObject {
+        #[arg(short, help = "Actually write the object into the object database.")]
+        write_obj: bool,
+        #[arg(help = "Path to the file")]
+        file: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -82,6 +91,7 @@ fn main() -> Result<()> {
                 hash,
             )?;
         }
+        Commands::HashObject { write_obj, file } => git_hash_object(*write_obj, file)?,
     };
     Ok(())
 }

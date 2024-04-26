@@ -97,4 +97,8 @@ impl GitObject {
             size,
         })
     }
+
+    pub fn write(&self) {
+        println!("WRITING")
+    }
 }
