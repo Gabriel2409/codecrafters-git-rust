@@ -66,6 +66,11 @@ enum Commands {
         #[arg(help = "Path to the file")]
         file: String,
     },
+    /// List the contents of a tree object
+    LsTree {
+        #[arg(help = "hash corresponding to a given git <object>")]
+        hash: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -92,6 +97,7 @@ fn main() -> Result<()> {
             )?;
         }
         Commands::HashObject { write_obj, file } => git_hash_object(*write_obj, file)?,
+        Commands::LsTree { .. } => todo!(),
     };
     Ok(())
 }

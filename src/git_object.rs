@@ -1,6 +1,7 @@
 use sha1::{Digest, Sha1};
 use std::fs::create_dir_all;
 use std::fs::File;
+use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
 use std::io::Seek;
@@ -11,9 +12,18 @@ use std::path::PathBuf;
 
 use crate::{Error, Result};
 
+// #[derive(Debug)]
+// pub struct GitObjectAttributes {
+//     hash: String,
+//     type_obj: String, // could make an enum instead
+//     permission: String,
+//     name: String,
+// }
+
+#[derive(Debug)]
 pub struct GitObject {
     pub type_obj: String,
-    pub size: u32,
+    pub size: usize,
     pub content: String,
     pub hash: String,
 }
@@ -27,40 +37,37 @@ impl GitObject {
 
         let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
 
-        // pub fn decompress<P: AsRef<Path>>(file_path: P) -> Result<GitObject> {
-        let input = BufReader::new(File::open(location)?);
-
-        let mut decompressed_content = Vec::new();
+        let file = File::open(location)?;
 
         // TODO: could be improved, maybe with read_until \0
-        let mut decoder = flate2::bufread::ZlibDecoder::new(input);
-        decoder.read_to_end(&mut decompressed_content)?;
-        let full_content = String::from_utf8_lossy(&decompressed_content).to_string();
+        let decoder = flate2::read::ZlibDecoder::new(file);
+        let mut buf = BufReader::new(decoder);
 
-        let mut space_iter = full_content.splitn(2, |c| c == ' ');
-        let type_obj = space_iter
-            .next()
-            .ok_or_else(|| Error::InvalidGitObject)?
-            .to_string();
+        let mut header_bytes = Vec::new();
+        buf.read_until(0, &mut header_bytes)?;
 
-        let mut null_iter = space_iter
-            .next()
-            .ok_or_else(|| Error::InvalidGitObject)?
-            .splitn(2, |c| c == '\0');
+        header_bytes.pop();
+        let header = String::from_utf8_lossy(&header_bytes).to_string();
 
-        let size: u32 = null_iter
-            .next()
-            .ok_or_else(|| Error::InvalidGitObject)?
-            .parse()
+        let (type_obj, size_str) = header
+            .split_once(' ')
+            .ok_or_else(|| Error::InvalidGitObject)?;
+
+        let size = size_str
+            .parse::<usize>()
             .map_err(|_| Error::InvalidGitObject)?;
 
-        let content = null_iter
-            .next()
-            .ok_or_else(|| Error::InvalidGitObject)?
-            .to_string();
+        // TODO: It seems the trees are actually not
+        // hashed in the same way
+        if type_obj == "tree" {
+            todo!("NOT YET IMPLEMENTED");
+        }
+
+        let mut content = String::new();
+        buf.read_to_string(&mut content)?;
 
         Ok(GitObject {
-            type_obj,
+            type_obj: type_obj.to_string(),
             size,
             content,
             hash: hash.to_string(),
@@ -71,7 +78,7 @@ impl GitObject {
         let file = File::open(&file_path)?;
 
         // TODO: probably a bad idea, files can be pretty big
-        let size = file.metadata()?.len() as u32;
+        let size = file.metadata()?.len() as usize;
 
         let mut reader = BufReader::new(file);
 
@@ -119,4 +126,44 @@ impl GitObject {
 
         Ok(())
     }
+
+    // pub fn get_tree_links(&self) -> Result<Vec<GitObjectAttributes>> {
+    //     if self.type_obj != "tree".to_string() {
+    //         Err(Error::NotATreeGitObject(self.hash.to_string()))?;
+    //     }
+    //
+    //     let linked = self
+    //         .content
+    //         .lines()
+    //         .try_fold(Vec::new(), |mut attributes, line| {
+    //             let parts = line.trim().split_whitespace().collect::<Vec<&str>>();
+    //             match parts.len() {
+    //                 4 => {
+    //                     attributes.push(GitObjectAttributes {
+    //                         permission: parts[0].to_string(),
+    //                         type_obj: parts[1].to_string(),
+    //                         hash: parts[2].to_string(),
+    //                         name: parts[3].to_string(),
+    //                     });
+    //                     Ok(attributes)
+    //                 }
+    //                 _ => Err(Error::InvalidGitObject),
+    //             }
+    //         })?;
+    //     Ok(linked)
+    // }
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//
+//     #[test]
+//     fn aa() {
+//         let git_obj = GitObject::from_hash("21423a4e94e96cc4027a9aed1a6b2ce0bd4c5972").unwrap();
+//         dbg!(&git_obj);
+//         let b = git_obj.get_tree_links().unwrap();
+//         dbg!(b);
+//         panic!("AA");
+//     }
+// }
