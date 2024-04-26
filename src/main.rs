@@ -1,8 +1,7 @@
-mod constants;
 mod error;
 mod git_cat_file;
 mod git_init;
-mod zlib_decompress;
+mod git_object;
 
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
