@@ -12,13 +12,13 @@ use std::path::PathBuf;
 
 use crate::{Error, Result};
 
-// #[derive(Debug)]
-// pub struct GitObjectAttributes {
-//     hash: String,
-//     type_obj: String, // could make an enum instead
-//     permission: String,
-//     name: String,
-// }
+#[derive(Debug)]
+pub struct GitObjectAttributes {
+    hash: String,
+    type_obj: String, // could make an enum instead
+    permission: String,
+    name: String,
+}
 
 #[derive(Debug)]
 pub struct GitObject {
@@ -41,10 +41,10 @@ impl GitObject {
 
         // TODO: could be improved, maybe with read_until \0
         let decoder = flate2::read::ZlibDecoder::new(file);
-        let mut buf = BufReader::new(decoder);
+        let mut reader = BufReader::new(decoder);
 
         let mut header_bytes = Vec::new();
-        buf.read_until(0, &mut header_bytes)?;
+        reader.read_until(0, &mut header_bytes)?;
 
         header_bytes.pop();
         let header = String::from_utf8_lossy(&header_bytes).to_string();
@@ -57,21 +57,33 @@ impl GitObject {
             .parse::<usize>()
             .map_err(|_| Error::InvalidGitObject)?;
 
-        // TODO: It seems the trees are actually not
-        // hashed in the same way
-        if type_obj == "tree" {
-            todo!("NOT YET IMPLEMENTED");
+        match type_obj {
+            "tree" => {
+                let mut buf_20 = vec![0; 20];
+                let mut content_bytes = Vec::new();
+                reader.read_until(0, &mut content_bytes)?;
+                content_bytes.pop(); // no need for null byte
+                content.push_str(&String::from_utf8_lossy(&content_bytes));
+
+                reader.read_exact(&mut buf_20)?;
+                for byte in buf_20.iter() {
+                    content.push_str(&format!("{:02x}", byte)); // Format each byte with leading zeros
+                }
+
+                reader.read_until(0, &mut content_bytes)?;
+                dbg!(&content);
+            }
+            _ => {
+                let mut content = String::new();
+                reader.read_to_string(&mut content)?;
+                Ok(GitObject {
+                    type_obj: type_obj.to_string(),
+                    size,
+                    content,
+                    hash: hash.to_string(),
+                })
+            }
         }
-
-        let mut content = String::new();
-        buf.read_to_string(&mut content)?;
-
-        Ok(GitObject {
-            type_obj: type_obj.to_string(),
-            size,
-            content,
-            hash: hash.to_string(),
-        })
     }
 
     pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<GitObject> {
@@ -115,16 +127,22 @@ impl GitObject {
         create_dir_all(parent)?;
         let output = File::create(location)?;
 
-        let header = format!("blob {}", self.size);
+        match self.type_obj.as_ref() {
+            "tree" => todo!(),
+            _ => {
+                let header = format!("blob {}", self.size);
 
-        let mut bytes = header.as_bytes().to_vec();
-        bytes.push(0);
-        bytes.extend(self.content.as_bytes());
+                let mut bytes = header.as_bytes().to_vec();
+                bytes.push(0);
+                bytes.extend(self.content.as_bytes());
 
-        let mut encoder = flate2::write::ZlibEncoder::new(output, flate2::Compression::default());
-        encoder.write_all(&bytes)?;
+                let mut encoder =
+                    flate2::write::ZlibEncoder::new(output, flate2::Compression::default());
+                encoder.write_all(&bytes)?;
 
-        Ok(())
+                Ok(())
+            }
+        }
     }
 
     // pub fn get_tree_links(&self) -> Result<Vec<GitObjectAttributes>> {
