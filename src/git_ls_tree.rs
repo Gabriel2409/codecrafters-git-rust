@@ -1,29 +1,38 @@
-use std::path::Path;
-
-use crate::git_object::GitObject;
+use crate::git_object::{GitObject, GitObjectContent};
 use crate::{Error, Result};
 
-pub fn git_ls_tree(name_only: bool, hash: &str) -> Result<()> {
+pub fn git_ls_tree(name_only: bool, recursive: bool, long: bool, hash: &str) -> Result<()> {
     let git_obj = GitObject::from_hash(hash)?;
 
-    if git_obj.type_obj != "tree" {
-        Err(Error::NotATreeGitObject(hash.to_string()))?;
-    }
-    let git_attrs = git_obj.get_tree_attributes()?;
-    if name_only {
-        for git_attr in git_attrs {
-            println!("{}", git_attr.name);
-        }
-    } else {
-        for git_attr in git_attrs {
-            println!(
-                "{:0>6} {} {}\t{}",
-                git_attr.permission, git_attr.type_obj, git_attr.hash, git_attr.name
-            );
-        }
+    match git_obj.content {
+        GitObjectContent::Tree { content } => {
+            for tree_child in content {
+                if recursive && tree_child.git_object.content_type() == "tree" {
+                    git_ls_tree(name_only, recursive, long, &tree_child.git_object.hash)?;
+                } else if name_only {
+                    println!("{}", tree_child.name);
+                } else if long {
+                    println!(
+                        "{:0>6} {} {} {:>8}\t{}",
+                        tree_child.mode,
+                        tree_child.git_object.content_type(),
+                        tree_child.git_object.hash,
+                        tree_child.git_object.size,
+                        tree_child.name
+                    );
+                } else {
+                    println!(
+                        "{:0>6} {} {}\t{}",
+                        tree_child.mode,
+                        tree_child.git_object.content_type(),
+                        tree_child.git_object.hash,
+                        tree_child.name
+                    );
+                }
+            }
+        } // Return Ok(()) on success
+        _ => Err(Error::NotATreeGitObject(hash.to_string()))?,
     }
 
     Ok(())
-
-    // let object_location = get_object_location(&args[3]).unwrap();
 }

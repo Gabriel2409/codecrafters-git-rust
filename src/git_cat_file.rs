@@ -1,4 +1,4 @@
-use crate::git_object::GitObject;
+use crate::git_object::{GitObject, GitObjectContent};
 use crate::Result;
 
 pub fn git_cat_file(
@@ -14,23 +14,25 @@ pub fn git_cat_file(
     if exit_with_zero_status_if_exists {
         println!("Valid object");
     } else if pretty_print {
-        match git_obj.type_obj.as_ref() {
-            "tree" => {
+        match git_obj.content {
+            GitObjectContent::Tree { content } => {
                 // NOTE: I could implement display instead for TreeAttributes
-                let git_attrs = git_obj.get_tree_attributes()?;
-                for git_attr in git_attrs {
+                for tree_child in content {
                     println!(
                         "{:0>6} {} {}\t{}",
-                        git_attr.permission, git_attr.type_obj, git_attr.hash, git_attr.name
+                        tree_child.mode,
+                        tree_child.git_object.content_type(),
+                        tree_child.git_object.hash,
+                        tree_child.name
                     );
                 }
             }
-            _ => print!("{}", git_obj.content),
+            GitObjectContent::Blob { content } => print!("{}", content),
         }
     } else if size {
         println!("{}", git_obj.size)
     } else if type_obj {
-        println!("{}", git_obj.type_obj)
+        println!("{}", git_obj.content_type())
     }
 
     Ok(())

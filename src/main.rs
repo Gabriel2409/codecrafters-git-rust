@@ -72,6 +72,10 @@ enum Commands {
     LsTree {
         #[arg(long, help = "Only print the name of the files")]
         name_only: bool,
+        #[arg(short, help = "Recurse into sub-trees")]
+        recursive: bool,
+        #[arg(short, long, help = "Show object size of blob (file) entries.")]
+        long: bool,
         #[arg(help = "hash corresponding to a given git <object>")]
         hash: String,
     },
@@ -101,7 +105,12 @@ fn main() -> Result<()> {
             )?;
         }
         Commands::HashObject { write_obj, file } => git_hash_object(*write_obj, file)?,
-        Commands::LsTree { name_only, hash } => git_ls_tree(*name_only, hash)?,
+        Commands::LsTree {
+            name_only,
+            recursive,
+            long,
+            hash,
+        } => git_ls_tree(*name_only, *recursive, *long, hash)?,
     };
     Ok(())
 }

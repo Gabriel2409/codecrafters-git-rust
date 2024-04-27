@@ -13,6 +13,4 @@ pub fn git_hash_object<P: AsRef<Path>>(write_obj: bool, file: P) -> Result<()> {
     println!("{}", git_obj.hash);
 
     Ok(())
-
-    // let object_location = get_object_location(&args[3]).unwrap();
 }
