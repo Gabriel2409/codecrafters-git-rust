@@ -35,7 +35,7 @@ pub fn git_cat_file(
                     content.author_timezone
                 );
                 println!();
-                println!("{}", content.commit_msg);
+                print!("{}", content.commit_msg);
             }
 
             GitObjectContent::Tree { content } => {
