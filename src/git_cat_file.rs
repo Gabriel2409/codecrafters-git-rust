@@ -59,6 +59,4 @@ pub fn git_cat_file(
     }
 
     Ok(())
-
-    // let object_location = get_object_location(&args[3]).unwrap();
 }

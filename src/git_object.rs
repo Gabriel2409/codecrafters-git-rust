@@ -140,7 +140,10 @@ impl GitObject {
                 let mut content = String::new();
                 reader.read_to_string(&mut content)?;
 
-                let (beginning, commit_msg) = content.split_once("\n\n").unwrap();
+                // TODO: may fail if empty commit msg
+                let (beginning, commit_msg) = content
+                    .split_once("\n\n")
+                    .ok_or_else(|| Error::InvalidGitObject)?;
                 let commit_msg = commit_msg.to_string();
                 let mut timestamp = 0;
                 let mut author_email = String::from("");
@@ -150,7 +153,10 @@ impl GitObject {
                 let mut tree_sha = String::from("");
 
                 for line in beginning.lines() {
-                    let (head, tail) = line.split_once(' ').unwrap();
+                    let (head, tail) = line
+                        .split_once(' ')
+                        .ok_or_else(|| Error::InvalidGitObject)?;
+
                     match head {
                         "tree" => {
                             tree_sha = tail.to_string();
@@ -161,9 +167,18 @@ impl GitObject {
                         "author" => {
                             let mut author_info = tail.split(' ').collect::<Vec<_>>();
 
-                            author_timezone = author_info.pop().unwrap().to_string();
-                            timestamp = author_info.pop().unwrap().parse::<u32>().unwrap();
-                            let author_email_enclosing = author_info.pop().unwrap();
+                            author_timezone = author_info
+                                .pop()
+                                .ok_or_else(|| Error::InvalidGitObject)?
+                                .to_string();
+                            timestamp = author_info
+                                .pop()
+                                .ok_or_else(|| Error::InvalidGitObject)?
+                                .parse::<u32>()
+                                .map_err(|_| Error::InvalidGitObject)?;
+                            let author_email_enclosing =
+                                author_info.pop().ok_or_else(|| Error::InvalidGitObject)?;
+
                             author_email = author_email_enclosing
                                 [1..author_email_enclosing.len() - 1]
                                 .to_string();
