@@ -7,6 +7,7 @@ pub enum Error {
     InvalidHash(String),
     InvalidGitObject,
     NotATreeGitObject(String),
+    ObjectBytesNotLoaded,
     // -- Externals
     #[from]
     Io(std::io::Error),

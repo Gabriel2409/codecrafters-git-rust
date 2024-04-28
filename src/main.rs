@@ -5,6 +5,8 @@ mod git_init;
 mod git_ls_tree;
 mod git_object;
 
+use std::{fs, path::PathBuf};
+
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
 use git_hash_object::git_hash_object;
@@ -12,6 +14,7 @@ use git_init::git_init;
 use git_ls_tree::git_ls_tree;
 
 use clap::{Parser, Subcommand};
+use git_object::GitObject;
 
 #[derive(Parser)]
 #[command(version, about="Custom git", long_about=None )]
@@ -82,6 +85,18 @@ enum Commands {
 }
 
 fn main() -> Result<()> {
+    let g = GitObject::from_dir("a").unwrap();
+    let paths = fs::read_dir("a").unwrap();
+
+    let mut names = paths
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .collect::<Vec<_>>();
+
+    names.sort();
+    for name in names {
+        println!("{}", name.to_str().unwrap());
+    }
+
     let cli = Cli::parse();
 
     // You can check for the existence of subcommands, and if found use their
