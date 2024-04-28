@@ -16,6 +16,7 @@ use crate::{Error, Result};
 pub enum GitObjectContent {
     Blob { content: String },
     Tree { content: Vec<TreeChild> },
+    Commit { content: CommitObjects },
 }
 
 #[derive(Debug)]
@@ -23,6 +24,19 @@ pub struct TreeChild {
     pub mode: u32,
     pub git_object: GitObject,
     pub name: String,
+}
+
+#[derive(Debug)]
+pub struct CommitObjects {
+    pub timestamp: u32,
+    // we'll have author and committer be the same
+    pub author_email: String,
+    pub author_name: String,
+    pub author_timezone: String,
+    // support for multiple parents. But in our case, we will have only 1
+    pub parents_sha: Vec<String>,
+    pub tree_sha: String,
+    pub commit_msg: String,
 }
 
 #[derive(Debug)]
@@ -122,11 +136,11 @@ impl GitObject {
                     object_bytes: None,
                 })
             }
+            // TODO: implement for commit objects
             _ => todo!(),
         }
     }
 
-    //
     pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<Self> {
         let file = File::open(&file_path)?;
         // let size = file.metadata()?.len() as usize;
@@ -216,6 +230,60 @@ impl GitObject {
         })
     }
 
+    pub fn from_commit_objects(commit_objects: CommitObjects) -> Result<Self> {
+        let mut content_bytes: Vec<u8> = Vec::new();
+
+        // Should i use the hash as a str or bytes here?
+        content_bytes.extend(Vec::from(
+            format!("tree {}", commit_objects.tree_sha).as_bytes(),
+        ));
+
+        for parent_sha in &commit_objects.parents_sha {
+            content_bytes.extend(Vec::from(format!("parent {}", parent_sha).as_bytes()));
+        }
+
+        content_bytes.extend(Vec::from(
+            format!(
+                "author {} <{}> {} {}",
+                commit_objects.author_name,
+                commit_objects.author_email,
+                commit_objects.timestamp,
+                commit_objects.author_timezone
+            )
+            .as_bytes(),
+        ));
+
+        content_bytes.extend(Vec::from(
+            format!(
+                "committer {} <{}> {} {}",
+                commit_objects.author_name,
+                commit_objects.author_email,
+                commit_objects.timestamp,
+                commit_objects.author_timezone
+            )
+            .as_bytes(),
+        ));
+
+        content_bytes.extend(Vec::from(commit_objects.commit_msg.to_string().as_bytes()));
+
+        let size = content_bytes.len();
+
+        let mut object_bytes = Vec::from(format!("commit {}", size));
+        object_bytes.push(0);
+        object_bytes.extend(&content_bytes);
+
+        let hash = GitObject::get_hash_from_bytes(&object_bytes);
+
+        Ok(GitObject {
+            size,
+            hash,
+            content: GitObjectContent::Commit {
+                content: commit_objects,
+            },
+            object_bytes: Some(object_bytes),
+        })
+    }
+
     pub fn write(&self) -> Result<()> {
         let (subdir, filename) = self.hash.split_at(2);
 
@@ -244,12 +312,14 @@ impl GitObject {
                 Ok(())
             }
             GitObjectContent::Blob { .. } => Ok(()),
+            GitObjectContent::Commit { .. } => Ok(()),
         }
     }
     pub fn content_type(&self) -> String {
         match self.content {
             GitObjectContent::Blob { .. } => "blob".to_owned(),
             GitObjectContent::Tree { .. } => "tree".to_owned(),
+            GitObjectContent::Commit { .. } => "commit".to_owned(),
         }
     }
 }

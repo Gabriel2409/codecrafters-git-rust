@@ -1,5 +1,6 @@
 mod error;
 mod git_cat_file;
+mod git_commit_tree;
 mod git_hash_object;
 mod git_init;
 mod git_ls_tree;
@@ -8,6 +9,7 @@ mod git_write_tree;
 
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
+use git_commit_tree::git_commit_tree;
 use git_hash_object::git_hash_object;
 use git_init::git_init;
 use git_ls_tree::git_ls_tree;
@@ -83,6 +85,15 @@ enum Commands {
     },
     /// Writes the full directory (not just what is in the staging area like in regular git)
     WriteTree,
+    /// Writes the commit object based on a tree and a parent commit
+    CommitTree {
+        #[arg(help = "sha1 of the tree")]
+        tree_sha: String,
+        #[arg(short, help = "sha of parent commit")]
+        parent_commit_sha: String,
+        #[arg(short, help = "commit message")]
+        message: String,
+    },
 }
 
 fn main() -> Result<()> {
@@ -116,6 +127,11 @@ fn main() -> Result<()> {
             hash,
         } => git_ls_tree(*name_only, *recursive, *long, hash)?,
         Commands::WriteTree => git_write_tree()?,
+        Commands::CommitTree {
+            tree_sha,
+            parent_commit_sha,
+            message,
+        } => git_commit_tree(tree_sha, parent_commit_sha, message)?,
     };
     Ok(())
 }

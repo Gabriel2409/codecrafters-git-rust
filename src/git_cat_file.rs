@@ -15,6 +15,29 @@ pub fn git_cat_file(
         println!("Valid object");
     } else if pretty_print {
         match git_obj.content {
+            GitObjectContent::Commit { content } => {
+                println!("tree {}", content.tree_sha);
+                for parent_sha in content.parents_sha {
+                    println!("parent {}", parent_sha);
+                }
+                println!(
+                    "author {} <{}> {} {}",
+                    content.author_name,
+                    content.author_email,
+                    content.timestamp,
+                    content.author_timezone
+                );
+                println!(
+                    "committer {} <{}> {} {}",
+                    content.author_name,
+                    content.author_email,
+                    content.timestamp,
+                    content.author_timezone
+                );
+                println!();
+                println!("{}", content.commit_msg);
+            }
+
             GitObjectContent::Tree { content } => {
                 // NOTE: I could implement display instead for TreeAttributes
                 for tree_child in content {
