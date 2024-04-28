@@ -129,9 +129,7 @@ impl GitObject {
     //
     pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<Self> {
         let file = File::open(&file_path)?;
-
-        // TODO: probably a bad idea, files can be pretty big
-        let size = file.metadata()?.len() as usize;
+        // let size = file.metadata()?.len() as usize;
 
         let mut reader = BufReader::new(file);
 
@@ -139,11 +137,14 @@ impl GitObject {
         reader.read_to_string(&mut content)?;
         reader.seek(SeekFrom::Start(0))?;
 
-        let header = format!("blob {}", size);
+        let mut content_bytes = Vec::new();
+        reader.read_to_end(&mut content_bytes)?;
+        let size = content_bytes.len();
 
+        let header = format!("blob {}", size);
         let mut object_bytes = header.as_bytes().to_vec();
         object_bytes.push(0);
-        reader.read_to_end(&mut object_bytes)?;
+        object_bytes.extend(&content_bytes);
 
         let hash = GitObject::get_hash_from_bytes(&object_bytes);
 
@@ -172,6 +173,10 @@ impl GitObject {
             let name = path.file_name().and_then(|e| e.to_str());
 
             if let Some(name) = name {
+                // Ignore git folder
+                if name == ".git" {
+                    continue;
+                }
                 let mode;
                 let git_object;
                 if path.is_file() {
@@ -186,7 +191,7 @@ impl GitObject {
 
                 let git_object_hash = git_object.hash.clone();
                 let hash_as_bytes = hex::decode(&git_object_hash)
-                    .map_err(|e| Error::InvalidHash(git_object_hash))?;
+                    .map_err(|_| Error::InvalidHash(git_object_hash))?;
                 content_bytes.extend(hash_as_bytes);
                 content.push(TreeChild {
                     mode,
@@ -214,7 +219,7 @@ impl GitObject {
     pub fn write(&self) -> Result<()> {
         let (subdir, filename) = self.hash.split_at(2);
 
-        let location: PathBuf = [".agit", "objects", subdir, filename].iter().collect();
+        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
 
         let parent = location.parent().ok_or_else(|| Error::InvalidGitObject)?;
         create_dir_all(parent)?;
