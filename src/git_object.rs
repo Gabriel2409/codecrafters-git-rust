@@ -235,16 +235,16 @@ impl GitObject {
 
         // Should i use the hash as a str or bytes here?
         content_bytes.extend(Vec::from(
-            format!("tree {}", commit_objects.tree_sha).as_bytes(),
+            format!("tree {}\n", commit_objects.tree_sha).as_bytes(),
         ));
 
         for parent_sha in &commit_objects.parents_sha {
-            content_bytes.extend(Vec::from(format!("parent {}", parent_sha).as_bytes()));
+            content_bytes.extend(Vec::from(format!("parent {}\n", parent_sha).as_bytes()));
         }
 
         content_bytes.extend(Vec::from(
             format!(
-                "author {} <{}> {} {}",
+                "author {} <{}> {} {}\n",
                 commit_objects.author_name,
                 commit_objects.author_email,
                 commit_objects.timestamp,
@@ -255,7 +255,7 @@ impl GitObject {
 
         content_bytes.extend(Vec::from(
             format!(
-                "committer {} <{}> {} {}",
+                "committer {} <{}> {} {}\n\n",
                 commit_objects.author_name,
                 commit_objects.author_email,
                 commit_objects.timestamp,
@@ -264,7 +264,9 @@ impl GitObject {
             .as_bytes(),
         ));
 
-        content_bytes.extend(Vec::from(commit_objects.commit_msg.to_string().as_bytes()));
+        content_bytes.extend(Vec::from(
+            format!("{}\n", commit_objects.commit_msg).as_bytes(),
+        ));
 
         let size = content_bytes.len();
 
