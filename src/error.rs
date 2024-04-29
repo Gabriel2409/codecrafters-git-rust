@@ -8,9 +8,13 @@ pub enum Error {
     InvalidGitObject,
     NotATreeGitObject(String),
     ObjectBytesNotLoaded,
+    Unreachable,
+    InvalidSmartHttpRes,
     // -- Externals
     #[from]
     Io(std::io::Error),
+    #[from]
+    Reqwest(reqwest::Error),
 }
 
 // region:    --- Error Boilerplate

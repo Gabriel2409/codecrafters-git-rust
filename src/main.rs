@@ -1,5 +1,6 @@
 mod error;
 mod git_cat_file;
+mod git_clone;
 mod git_commit_tree;
 mod git_hash_object;
 mod git_init;
@@ -9,6 +10,7 @@ mod git_write_tree;
 
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
+use git_clone::git_clone;
 use git_commit_tree::git_commit_tree;
 use git_hash_object::git_hash_object;
 use git_init::git_init;
@@ -94,6 +96,12 @@ enum Commands {
         #[arg(short, help = "commit message")]
         message: String,
     },
+    Clone {
+        #[arg(help = "url of the repository to clone")]
+        repository_url: String,
+        #[arg(help = "directory to clone into")]
+        directory: Option<String>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -132,6 +140,17 @@ fn main() -> Result<()> {
             parent_commit_sha,
             message,
         } => git_commit_tree(tree_sha, parent_commit_sha, message)?,
+        Commands::Clone {
+            repository_url,
+            directory,
+        } => {
+            let directory = match directory {
+                None => repository_url.split('/').last().ok_or(Error::Unreachable)?,
+                Some(directory) => directory,
+            };
+
+            git_clone(repository_url, directory)?
+        }
     };
     Ok(())
 }
