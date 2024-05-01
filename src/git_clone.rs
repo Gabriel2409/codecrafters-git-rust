@@ -121,39 +121,54 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
     // then for the packfile itself, we iterate through all the objects
     for _ in 0..nb_objects {
         println!();
-        let mut buf = vec![0];
-        reader.read_exact(&mut buf)?;
-        let cur_byte = buf[0];
 
+        // TODO: FInd why this works and the solution below does not
+        // let mut size = 0usize;
+        // let mut bitcount = 0usize;
+        // loop {
+        //     let mut v = [0u8; 1];
+        //     reader.read_exact(&mut v)?;
+        //     let tmp = (v[0] & 0b0111_1111) as usize;
+        //     size += tmp << bitcount;
+        //     bitcount += 7;
+        //     if v[0] >> 7 == 0 {
+        //         break;
+        //     }
+        // }
+        //
+        // let object_type = ((size >> 4) & 0b111) as u8;
+        // let lower = size & 0b1111;
+        // size >>= 7;
+        // size <<= 4;
+        // size += lower;
+        // let cur_size = size;
+
+        let mut buf = [0];
+        reader.read_exact(&mut buf)?;
+        let mut cur_byte = buf[0];
         // valid object types
         // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
         let object_type = cur_byte >> 4 & 0b0111;
         dbg!(object_type);
 
-        // then next 4 bits are part of size
+        // then last 4 bits are part of size
         // Note that the size corresponds to the size of the uncompressed object
+        // so we can not use it to read just the correct amount of bytes.
+        // Fortunately, when decompressing with Zlib, it will stop automatically
+        // at the EOF and we can then compare that the cur_size is equal to the
+        // size of the buffer
         let mut cur_size = cur_byte & 0b1111;
 
-        // If MSB is set
-        if cur_byte >= 128 {
-            let mut shifter = 4;
-            loop {
-                reader.read_exact(&mut buf)?;
-                let cur_byte = buf[0];
-                // if the MSB is 0, then the next bits are part of the size
-                // and then the rest encodes the data
-                if cur_byte < 128 {
-                    cur_size += cur_byte << shifter;
-                    break;
-                // if the MSB is 1, the next bits are part of the size
-                // and we test the next byte
-                } else {
-                    cur_size += (cur_byte & 0b01111111) << shifter;
-                    shifter += 7;
-                }
-            }
+        // while the MSB is 1,
+        //  it means that the 7 lower bits of the next byte are part of the size
+        let mut shift = 4;
+        while cur_byte >= 128 {
+            reader.read_exact(&mut buf)?;
+            cur_byte = buf[0];
+            let additional_size = (cur_byte & 0b01111111) << shift;
+            shift += 7;
+            cur_size += additional_size;
         }
-
         dbg!(cur_size);
 
         let mut buf = Vec::new();
@@ -168,10 +183,10 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
         if buf.len() != cur_size as usize {
             // check that the uncompressed length corresponds to what was
             // mentionned in the packfile
-            // return Err(Error::IncorrectPackObjectSize {
-            //     expected: cur_size as usize,
-            //     got: buf.len(),
-            // });
+            return Err(Error::IncorrectPackObjectSize {
+                expected: cur_size as usize,
+                got: buf.len(),
+            });
         }
 
         if object_type == 1 || object_type == 3 {
