@@ -10,6 +10,10 @@ pub enum Error {
     ObjectBytesNotLoaded,
     Unreachable,
     InvalidSmartHttpRes,
+    IncorrectPackObjectSize {
+        expected: usize,
+        got: usize,
+    },
     // -- Externals
     #[from]
     Io(std::io::Error),

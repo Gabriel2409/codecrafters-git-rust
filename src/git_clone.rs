@@ -92,6 +92,8 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
         .body(pack_content)
         .send()?;
 
+    // for more control, we pass the res in a bufreader
+
     // res starts with 0008NAK\nPACK
     let mut buf = vec![0; 12];
     res.read_exact(&mut buf)?;
@@ -106,55 +108,80 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
     res.read_exact(&mut buf)?;
 
     // then 4 bytes containing the number of objects in the pack
-    let mut buf = vec![0; 4];
+    let mut buf = [0u8; 4];
     res.read_exact(&mut buf)?;
-    let nb_objects = buf[3] + buf[2] * 2 + buf[1] * 4 + buf[0] * 8;
+    // let nb_objects = buf[3] + buf[2] * 2 + buf[1] * 4 + buf[0] * 8;
+    let nb_objects = u32::from_be_bytes(buf);
+
     dbg!(nb_objects);
 
-    // then the packfile itself
-    let mut buf = vec![0];
-    res.read_exact(&mut buf)?;
-    let cur_byte = buf[0];
+    // create a bufreader for more control on the decoding
+    let mut reader = BufReader::new(res);
 
-    // 1st bit should be 1 (MSB)
-    if cur_byte < 128 {
-        return Err(Error::InvalidSmartHttpRes);
-    }
-
-    // valid object types
-    // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
-    let object_type = cur_byte >> 4 & 0b0111;
-    dbg!(object_type);
-
-    // then next 3 bits are part of size
-    let mut cur_size = cur_byte & 0b111;
-
-    //TODO:
-    loop {
-        println!("A");
-        res.read_exact(&mut buf)?;
+    // then for the packfile itself, we iterate through all the objects
+    for _ in 0..nb_objects {
+        println!();
+        let mut buf = vec![0];
+        reader.read_exact(&mut buf)?;
         let cur_byte = buf[0];
-        // if the MSB is 0, then the next bits are part of the size
-        // and then the rest encodes the data
-        if cur_byte < 128 {
-            cur_size += cur_byte << 4;
-            break;
-        // if the MSB is 1
-        } else {
-            cur_size += (cur_byte & 0b01111111) << 4;
+
+        // valid object types
+        // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
+        let object_type = cur_byte >> 4 & 0b0111;
+        dbg!(object_type);
+
+        // then next 4 bits are part of size
+        // Note that the size corresponds to the size of the uncompressed object
+        let mut cur_size = cur_byte & 0b1111;
+
+        // If MSB is set
+        if cur_byte >= 128 {
+            let mut shifter = 4;
+            loop {
+                reader.read_exact(&mut buf)?;
+                let cur_byte = buf[0];
+                // if the MSB is 0, then the next bits are part of the size
+                // and then the rest encodes the data
+                if cur_byte < 128 {
+                    cur_size += cur_byte << shifter;
+                    break;
+                // if the MSB is 1, the next bits are part of the size
+                // and we test the next byte
+                } else {
+                    cur_size += (cur_byte & 0b01111111) << shifter;
+                    shifter += 7;
+                }
+            }
         }
+
+        dbg!(cur_size);
+
+        let mut buf = Vec::new();
+        let mut z = flate2::bufread::ZlibDecoder::new(reader);
+        // zlib will actually stop on EOF
+        z.read_to_end(&mut buf)?;
+        dbg!(buf.len());
+
+        // TODO: There is either an error with the reasonning here
+        // or the cur_size and the buf.len are not supposed to be always equal
+
+        if buf.len() != cur_size as usize {
+            // check that the uncompressed length corresponds to what was
+            // mentionned in the packfile
+            // return Err(Error::IncorrectPackObjectSize {
+            //     expected: cur_size as usize,
+            //     got: buf.len(),
+            // });
+        }
+
+        if object_type == 1 || object_type == 3 {
+            let s = String::from_utf8(buf).unwrap();
+            dbg!(s);
+        }
+
+        //
+        reader = z.into_inner();
     }
-
-    dbg!(cur_size);
-
-    let mut buf = vec![0; cur_size as usize];
-    let mut buf = vec![0; 163];
-    res.read_exact(&mut buf)?;
-    let mut z = flate2::bufread::ZlibDecoder::new(&buf[..]);
-    let mut s = String::new();
-    z.read_to_string(&mut s)?;
-    dbg!(s);
-
     Ok(())
 }
 
