@@ -122,30 +122,10 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
     for _ in 0..nb_objects {
         println!();
 
-        // TODO: FInd why this works and the solution below does not
-        // let mut size = 0usize;
-        // let mut bitcount = 0usize;
-        // loop {
-        //     let mut v = [0u8; 1];
-        //     reader.read_exact(&mut v)?;
-        //     let tmp = (v[0] & 0b0111_1111) as usize;
-        //     size += tmp << bitcount;
-        //     bitcount += 7;
-        //     if v[0] >> 7 == 0 {
-        //         break;
-        //     }
-        // }
-        //
-        // let object_type = ((size >> 4) & 0b111) as u8;
-        // let lower = size & 0b1111;
-        // size >>= 7;
-        // size <<= 4;
-        // size += lower;
-        // let cur_size = size;
-
         let mut buf = [0];
         reader.read_exact(&mut buf)?;
-        let mut cur_byte = buf[0];
+        let mut cur_byte = buf[0] as usize; // usize to avoid overflow when shifting
+
         // valid object types
         // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
         let object_type = cur_byte >> 4 & 0b0111;
@@ -164,7 +144,7 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
         let mut shift = 4;
         while cur_byte >= 128 {
             reader.read_exact(&mut buf)?;
-            cur_byte = buf[0];
+            cur_byte = buf[0] as usize;
             let additional_size = (cur_byte & 0b01111111) << shift;
             shift += 7;
             cur_size += additional_size;
@@ -177,14 +157,11 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
         z.read_to_end(&mut buf)?;
         dbg!(buf.len());
 
-        // TODO: There is either an error with the reasonning here
-        // or the cur_size and the buf.len are not supposed to be always equal
-
-        if buf.len() != cur_size as usize {
+        if buf.len() != cur_size {
             // check that the uncompressed length corresponds to what was
             // mentionned in the packfile
             return Err(Error::IncorrectPackObjectSize {
-                expected: cur_size as usize,
+                expected: cur_size,
                 got: buf.len(),
             });
         }
@@ -194,7 +171,8 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
             dbg!(s);
         }
 
-        //
+        // important to release the inner reader because it is moved in the
+        // zlib decoder.
         reader = z.into_inner();
     }
     Ok(())
