@@ -18,6 +18,10 @@ pub enum Error {
         expected: String,
         got: String,
     },
+    WrongObjectSize {
+        expected: usize,
+        got: usize,
+    },
     InvalidDiscoveryService {
         expected: String,
         got: String,

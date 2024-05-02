@@ -167,7 +167,9 @@ pub enum GitPackObject {
         content_bytes: Vec<u8>,
     },
     RefDelta {
-        base_object: String,
+        base_object_hash: String,
+        base_object_size: usize,
+        reconstructed_object_size: usize,
         content_bytes: Vec<u8>,
     },
 }
@@ -211,6 +213,7 @@ impl GitPack {
         while cur_byte >= 128 {
             reader.read_exact(&mut buf)?;
             cur_byte = buf[0] as usize;
+            // the reason we need to cast as usize is to avoid overflow
             let additional_size = (cur_byte & 0b01111111) << shift;
             shift += 7;
             cur_size += additional_size;
@@ -218,28 +221,38 @@ impl GitPack {
         Ok((object_type, cur_size))
     }
 
+    /// same as get_next_object_type_and_size but adapted for cases where the
+    /// type is not encoded in the first byte
     /// After OBS_REF_DELTA (7), we have the base object (20 bits)
     /// then the size of the base object and the size of the next object
     /// Here for the size encoding, we don't need to reserve bits for the type
     /// and so we can use 7 bits starting from the first byte
     pub fn get_next_size_without_type<R: Read>(reader: &mut R) -> Result<usize> {
         let mut buf = [0];
-        reader.read_exact(&mut buf)?;
-        let mut cur_byte = buf[0] as usize; // usize to avoid overflow when shifting
+        let mut shift = 0;
+        let mut cur_size = 0;
 
-        let mut cur_size = cur_byte & 0b1111111;
-
-        // while the MSB is 1,
-        //  it means that the 7 lower bits of the next byte are part of the size
-        let mut shift = 7;
-        while cur_byte >= 128 {
+        loop {
             reader.read_exact(&mut buf)?;
-            cur_byte = buf[0] as usize;
+            let cur_byte = buf[0] as usize;
             let additional_size = (cur_byte & 0b01111111) << shift;
             shift += 7;
             cur_size += additional_size;
+            if cur_byte < 128 {
+                break;
+            }
         }
         Ok(cur_size)
+    }
+
+    pub fn find_highest_multiple_bit_pos(num: usize, multiple_bit: usize) -> usize {
+        let mut pos = 0;
+        let mut num = num;
+        while num > 0 {
+            pos += 1;
+            num >>= multiple_bit;
+        }
+        pos
     }
 
     pub fn from_repository_url_and_pack_content(
@@ -323,15 +336,39 @@ impl GitPack {
                     let mut buf = Vec::new();
                     let mut z = flate2::bufread::ZlibDecoder::new(reader);
 
-                    // TODO: NOT SURE IT WORKS
-                    let ty = Self::get_next_size_without_type(&mut z)?;
-                    let ty2 = Self::get_next_size_without_type(&mut z)?;
-                    dbg!(ty, ty2);
+                    let base_object_size = Self::get_next_size_without_type(&mut z)?;
+                    let reconstructed_object_size = Self::get_next_size_without_type(&mut z)?;
+
+                    // TODO: probably a better way to do it
+                    // but we can easily retrieve the nb of bytes needed for the size as we use
+                    // 7 bits per byte
+                    let nb_bytes_base_object_size =
+                        Self::find_highest_multiple_bit_pos(base_object_size, 7);
+                    let nb_bytes_reconstructed_object_size =
+                        Self::find_highest_multiple_bit_pos(reconstructed_object_size, 7);
 
                     z.read_to_end(&mut buf)?;
+
+                    if buf.len() + nb_bytes_base_object_size + nb_bytes_reconstructed_object_size
+                        != cur_size
+                    {
+                        return Err(Error::IncorrectPackObjectSize {
+                            expected: cur_size,
+                            got: buf.len(),
+                        });
+                    }
+
+                    dbg!(
+                        base_object_size,
+                        reconstructed_object_size,
+                        cur_size,
+                        buf.len()
+                    );
                     let git_pack_object = GitPackObject::RefDelta {
-                        base_object: hex::encode(base_object),
+                        base_object_hash: hex::encode(base_object),
                         content_bytes: buf,
+                        base_object_size,
+                        reconstructed_object_size,
                     };
                     pack_objects.push(git_pack_object);
                     reader = z.into_inner();
@@ -348,32 +385,45 @@ impl GitPack {
 
         let mut git_objects = Vec::new();
 
-        for (i, git_pack_object) in self.pack_objects.into_iter().enumerate() {
+        for git_pack_object in self.pack_objects {
             match git_pack_object {
                 GitPackObject::Blob { content_bytes } => {
                     let git_object = GitObject::from_blob_content_bytes(content_bytes)?;
-                    obj_map.insert(git_object.hash.clone(), i);
+                    obj_map.insert(git_object.hash.clone(), git_objects.len());
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tree { content_bytes } => {
                     let git_object = GitObject::from_tree_content_bytes(content_bytes)?;
-                    obj_map.insert(git_object.hash.clone(), i);
+                    obj_map.insert(git_object.hash.clone(), git_objects.len());
                     git_objects.push(git_object);
                 }
                 GitPackObject::Commit { content_bytes } => {
                     let git_object = GitObject::from_commit_content_bytes(content_bytes)?;
-                    obj_map.insert(git_object.hash.clone(), i);
+                    obj_map.insert(git_object.hash.clone(), git_objects.len());
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tag { .. } => {
                     println!("tag not supported");
                 }
                 GitPackObject::RefDelta {
-                    base_object,
+                    base_object_hash,
                     content_bytes,
+                    base_object_size,
+                    reconstructed_object_size,
                 } => {
-                    if obj_map.contains_key(&base_object) {
-                        println!("OK");
+                    if obj_map.contains_key(&base_object_hash) {
+                        let real_base_object_size =
+                            git_objects[*obj_map.get(&base_object_hash).unwrap()].size;
+                        if real_base_object_size != base_object_size {
+                            Err(Error::WrongObjectSize {
+                                expected: real_base_object_size,
+                                got: base_object_size,
+                            })?;
+                        }
+
+                        // TODO: actual construction of the object
+
+                        println!("{:08b}", content_bytes[0])
                     } else {
                         println!("STRANGE");
                     }
