@@ -1,5 +1,5 @@
 use crate::git_object::{GitObject, GitObjectContent};
-use crate::Result;
+use crate::{Error, Result};
 
 pub fn git_cat_file(
     pretty_print: bool,
@@ -41,13 +41,18 @@ pub fn git_cat_file(
             GitObjectContent::Tree { content } => {
                 // NOTE: I could implement display instead for TreeAttributes
                 for tree_child in content {
-                    println!(
-                        "{:0>6} {} {}\t{}",
-                        tree_child.mode,
-                        tree_child.git_object.content_type(),
-                        tree_child.git_object.hash,
-                        tree_child.name
-                    );
+                    match tree_child.git_object {
+                        Some(git_obj) => {
+                            println!(
+                                "{:0>6} {} {}\t{}",
+                                tree_child.mode,
+                                git_obj.content_type(),
+                                git_obj.hash,
+                                tree_child.name
+                            );
+                        }
+                        None => Err(Error::TreeChildNotLoaded)?,
+                    }
                 }
             }
             GitObjectContent::Blob { content } => print!("{}", content),

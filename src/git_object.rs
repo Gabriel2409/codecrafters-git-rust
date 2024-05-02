@@ -3,8 +3,6 @@ use std::fs::{create_dir_all, read_dir, File};
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Read;
-use std::io::Seek;
-use std::io::SeekFrom;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
@@ -22,7 +20,9 @@ pub enum GitObjectContent {
 #[derive(Debug)]
 pub struct TreeChild {
     pub mode: u32,
-    pub git_object: GitObject,
+    /// Do not store the full child object when unnecessary
+    pub git_object: Option<GitObject>,
+    pub hash: String,
     pub name: String,
 }
 
@@ -115,7 +115,8 @@ impl GitObject {
                     content.push(TreeChild {
                         mode,
                         name: name.to_string(),
-                        git_object: GitObject::from_hash(&child_hash)?,
+                        hash: child_hash.to_string(),
+                        git_object: Some(GitObject::from_hash(&child_hash)?),
                     });
                     content_bytes.clear();
                 }
@@ -212,18 +213,7 @@ impl GitObject {
         }
     }
 
-    pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<Self> {
-        let file = File::open(&file_path)?;
-        // let size = file.metadata()?.len() as usize;
-
-        let mut reader = BufReader::new(file);
-
-        let mut content = String::new();
-        reader.read_to_string(&mut content)?;
-        reader.seek(SeekFrom::Start(0))?;
-
-        let mut content_bytes = Vec::new();
-        reader.read_to_end(&mut content_bytes)?;
+    pub fn from_blob_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
         let size = content_bytes.len();
 
         let header = format!("blob {}", size);
@@ -232,6 +222,7 @@ impl GitObject {
         object_bytes.extend(&content_bytes);
 
         let hash = GitObject::get_hash_from_bytes(&object_bytes);
+        let content = String::from_utf8(content_bytes).map_err(|_| Error::InvalidSmartHttpRes)?;
 
         Ok(GitObject {
             object_bytes: Some(object_bytes),
@@ -239,6 +230,21 @@ impl GitObject {
             content: GitObjectContent::Blob { content },
             size,
         })
+    }
+
+    pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<Self> {
+        let file = File::open(&file_path)?;
+        // let size = file.metadata()?.len() as usize;
+
+        let mut reader = BufReader::new(file);
+
+        // let mut content = String::new();
+        // reader.read_to_string(&mut content)?;
+        // reader.seek(SeekFrom::Start(0))?;
+
+        let mut content_bytes = Vec::new();
+        reader.read_to_end(&mut content_bytes)?;
+        Self::from_blob_content_bytes(content_bytes)
     }
 
     pub fn from_dir<P: AsRef<Path>>(dir_path: P) -> Result<Self> {
@@ -264,6 +270,7 @@ impl GitObject {
                 }
                 let mode;
                 let git_object;
+                // TODO: support for symbolic link
                 if path.is_file() {
                     mode = 100644;
                     git_object = GitObject::from_blob(&path)?;
@@ -276,12 +283,13 @@ impl GitObject {
 
                 let git_object_hash = git_object.hash.clone();
                 let hash_as_bytes = hex::decode(&git_object_hash)
-                    .map_err(|_| Error::InvalidHash(git_object_hash))?;
+                    .map_err(|_| Error::InvalidHash(git_object_hash.clone()))?;
                 content_bytes.extend(hash_as_bytes);
                 content.push(TreeChild {
                     mode,
                     name: name.to_string(),
-                    git_object,
+                    hash: git_object_hash,
+                    git_object: Some(git_object),
                 });
             }
         }
@@ -380,7 +388,11 @@ impl GitObject {
         match &self.content {
             GitObjectContent::Tree { content } => {
                 for tree_child in content {
-                    tree_child.git_object.write()?;
+                    tree_child
+                        .git_object
+                        .as_ref()
+                        .ok_or_else(|| Error::TreeChildNotLoaded)?
+                        .write()?;
                 }
                 Ok(())
             }

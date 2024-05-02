@@ -6,6 +6,7 @@ mod git_hash_object;
 mod git_init;
 mod git_ls_tree;
 mod git_object;
+mod git_pack;
 mod git_write_tree;
 
 pub use error::{Error, Result};

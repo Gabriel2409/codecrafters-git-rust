@@ -7,9 +7,21 @@ pub enum Error {
     InvalidHash(String),
     InvalidGitObject,
     NotATreeGitObject(String),
+    TreeChildNotLoaded,
     ObjectBytesNotLoaded,
     Unreachable,
     InvalidSmartHttpRes,
+    InvalidDiscoveryUrl(String),
+    ContentTypeNotFound,
+    ContentTypeInvalid,
+    WrongContentType {
+        expected: String,
+        got: String,
+    },
+    InvalidDiscoveryService {
+        expected: String,
+        got: String,
+    },
     InvalidPackObjectType(usize),
     IncorrectPackObjectSize {
         expected: usize,
