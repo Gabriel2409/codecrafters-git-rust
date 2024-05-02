@@ -130,7 +130,6 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
         // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
         let object_type = cur_byte >> 4 & 0b0111;
         dbg!(object_type);
-
         // then last 4 bits are part of size
         // Note that the size corresponds to the size of the uncompressed object
         // so we can not use it to read just the correct amount of bytes.
@@ -151,29 +150,47 @@ pub fn git_clone<P: AsRef<Path>>(repository_url: &str, directory: P) -> Result<(
         }
         dbg!(cur_size);
 
-        let mut buf = Vec::new();
-        let mut z = flate2::bufread::ZlibDecoder::new(reader);
-        // zlib will actually stop on EOF
-        z.read_to_end(&mut buf)?;
-        dbg!(buf.len());
+        match object_type {
+            1..=4 => {
+                let mut buf = Vec::new();
+                let mut z = flate2::bufread::ZlibDecoder::new(reader);
+                // zlib will actually stop on EOF
+                z.read_to_end(&mut buf)?;
+                dbg!(buf.len());
 
-        if buf.len() != cur_size {
-            // check that the uncompressed length corresponds to what was
-            // mentionned in the packfile
-            return Err(Error::IncorrectPackObjectSize {
-                expected: cur_size,
-                got: buf.len(),
-            });
+                if buf.len() != cur_size {
+                    // check that the uncompressed length corresponds to what was
+                    // mentionned in the packfile
+                    return Err(Error::IncorrectPackObjectSize {
+                        expected: cur_size,
+                        got: buf.len(),
+                    });
+                }
+
+                if object_type == 1 || object_type == 3 {
+                    let s = String::from_utf8(buf).unwrap();
+                    dbg!(s);
+                }
+
+                // important to release the inner reader because it is moved in the
+                // zlib decoder.
+                reader = z.into_inner();
+            }
+            6 => todo!(),
+            7 => {
+                // after the size, we get the base object name
+                let mut buf = vec![0; 20];
+                reader.read_exact(&mut buf)?;
+
+                // then the diff as zlib compressed data
+                let mut buf = Vec::new();
+                let mut z = flate2::bufread::ZlibDecoder::new(reader);
+                z.read_to_end(&mut buf)?;
+                dbg!(buf.len());
+                reader = z.into_inner();
+            }
+            x => Err(Error::InvalidPackObjectType(x))?,
         }
-
-        if object_type == 1 || object_type == 3 {
-            let s = String::from_utf8(buf).unwrap();
-            dbg!(s);
-        }
-
-        // important to release the inner reader because it is moved in the
-        // zlib decoder.
-        reader = z.into_inner();
     }
     Ok(())
 }

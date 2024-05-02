@@ -10,6 +10,7 @@ pub enum Error {
     ObjectBytesNotLoaded,
     Unreachable,
     InvalidSmartHttpRes,
+    InvalidPackObjectType(usize),
     IncorrectPackObjectSize {
         expected: usize,
         got: usize,
