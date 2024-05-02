@@ -14,7 +14,7 @@ pub fn git_commit_tree(tree_sha: &str, parent_commit_sha: &str, message: &str) -
 
     let git_obj = GitObject::from_commit_objects(commit_objects)?;
 
-    git_obj.write()?;
+    git_obj.write(true)?;
     println!("{}", git_obj.hash);
 
     Ok(())

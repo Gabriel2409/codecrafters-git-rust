@@ -26,6 +26,40 @@ pub struct TreeChild {
     pub name: String,
 }
 
+impl TreeChild {
+    /// Creates a TreeChild without loading the underlying git_object
+    pub fn from_reader<R: BufRead>(reader: &mut R) -> Result<Option<Self>> {
+        let mut buf_20 = vec![0; 20];
+        let mut content_bytes = Vec::new();
+        reader.read_until(0, &mut content_bytes)?;
+        if content_bytes.is_empty() {
+            return Ok(None);
+        }
+        content_bytes.pop(); // no need for null byte
+        let header = String::from_utf8_lossy(&content_bytes).to_string();
+        let (mode, name) = header
+            .split_once(' ')
+            .ok_or_else(|| Error::InvalidGitObject)?;
+
+        let mode = mode.parse::<u32>().map_err(|_| Error::InvalidGitObject)?;
+
+        reader.read_exact(&mut buf_20)?;
+
+        let mut child_hash = String::new();
+        for byte in buf_20.iter() {
+            child_hash.push_str(&format!("{:02x}", byte));
+        }
+        // let child_hash = hex::encode(&buf_20); // other possibility with hex crate
+
+        Ok(Some(TreeChild {
+            mode,
+            name: name.to_string(),
+            hash: child_hash.to_string(),
+            git_object: None,
+        }))
+    }
+}
+
 #[derive(Debug)]
 pub struct CommitObjects {
     pub timestamp: u32,
@@ -37,6 +71,70 @@ pub struct CommitObjects {
     pub parents_sha: Vec<String>,
     pub tree_sha: String,
     pub commit_msg: String,
+}
+
+impl CommitObjects {
+    pub fn from_content(content: &str) -> Result<Self> {
+        // TODO: may fail if empty commit msg
+        let (beginning, commit_msg) = content
+            .split_once("\n\n")
+            .ok_or_else(|| Error::InvalidGitObject)?;
+        let commit_msg = commit_msg.to_string();
+        let mut timestamp = 0;
+        let mut author_email = String::from("");
+        let mut author_name = String::from("");
+        let mut author_timezone = String::from("");
+        let mut parents_sha = Vec::new();
+        let mut tree_sha = String::from("");
+
+        for line in beginning.lines() {
+            let (head, tail) = line
+                .split_once(' ')
+                .ok_or_else(|| Error::InvalidGitObject)?;
+
+            match head {
+                "tree" => {
+                    tree_sha = tail.to_string();
+                }
+                "parent" => {
+                    parents_sha.push(tail.to_string());
+                }
+                "author" => {
+                    let mut author_info = tail.split(' ').collect::<Vec<_>>();
+
+                    author_timezone = author_info
+                        .pop()
+                        .ok_or_else(|| Error::InvalidGitObject)?
+                        .to_string();
+                    timestamp = author_info
+                        .pop()
+                        .ok_or_else(|| Error::InvalidGitObject)?
+                        .parse::<u32>()
+                        .map_err(|_| Error::InvalidGitObject)?;
+                    let author_email_enclosing =
+                        author_info.pop().ok_or_else(|| Error::InvalidGitObject)?;
+
+                    author_email =
+                        author_email_enclosing[1..author_email_enclosing.len() - 1].to_string();
+                    author_name = author_info.join(" ");
+                }
+
+                "committer" => {
+                    // same as author for us
+                }
+                _ => {}
+            }
+        }
+        Ok(CommitObjects {
+            timestamp,
+            author_name,
+            author_email,
+            author_timezone,
+            parents_sha,
+            tree_sha,
+            commit_msg,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -88,37 +186,17 @@ impl GitObject {
         match type_obj {
             // content is actually just permission name hash for trees
             "tree" => {
-                let mut buf_20 = vec![0; 20];
-                let mut content_bytes = Vec::new();
                 let mut content = Vec::new();
                 loop {
-                    reader.read_until(0, &mut content_bytes)?;
-                    if content_bytes.is_empty() {
-                        break;
+                    let tree_child = TreeChild::from_reader(&mut reader)?;
+                    match tree_child {
+                        None => break,
+                        Some(mut tree_child) => {
+                            // loads the underlying git object
+                            tree_child.git_object = Some(GitObject::from_hash(&tree_child.hash)?);
+                            content.push(tree_child);
+                        }
                     }
-                    content_bytes.pop(); // no need for null byte
-                    let header = String::from_utf8_lossy(&content_bytes).to_string();
-                    let (mode, name) = header
-                        .split_once(' ')
-                        .ok_or_else(|| Error::InvalidGitObject)?;
-
-                    let mode = mode.parse::<u32>().map_err(|_| Error::InvalidGitObject)?;
-
-                    reader.read_exact(&mut buf_20)?;
-
-                    let mut child_hash = String::new();
-                    for byte in buf_20.iter() {
-                        child_hash.push_str(&format!("{:02x}", byte));
-                    }
-                    // let child_hash = hex::encode(&buf_20); // other possibility with hex crate
-
-                    content.push(TreeChild {
-                        mode,
-                        name: name.to_string(),
-                        hash: child_hash.to_string(),
-                        git_object: Some(GitObject::from_hash(&child_hash)?),
-                    });
-                    content_bytes.clear();
                 }
                 Ok(GitObject {
                     size,
@@ -141,71 +219,14 @@ impl GitObject {
                 let mut content = String::new();
                 reader.read_to_string(&mut content)?;
 
-                // TODO: may fail if empty commit msg
-                let (beginning, commit_msg) = content
-                    .split_once("\n\n")
-                    .ok_or_else(|| Error::InvalidGitObject)?;
-                let commit_msg = commit_msg.to_string();
-                let mut timestamp = 0;
-                let mut author_email = String::from("");
-                let mut author_name = String::from("");
-                let mut author_timezone = String::from("");
-                let mut parents_sha = Vec::new();
-                let mut tree_sha = String::from("");
+                let commit_objects = CommitObjects::from_content(&content)?;
 
-                for line in beginning.lines() {
-                    let (head, tail) = line
-                        .split_once(' ')
-                        .ok_or_else(|| Error::InvalidGitObject)?;
-
-                    match head {
-                        "tree" => {
-                            tree_sha = tail.to_string();
-                        }
-                        "parent" => {
-                            parents_sha.push(tail.to_string());
-                        }
-                        "author" => {
-                            let mut author_info = tail.split(' ').collect::<Vec<_>>();
-
-                            author_timezone = author_info
-                                .pop()
-                                .ok_or_else(|| Error::InvalidGitObject)?
-                                .to_string();
-                            timestamp = author_info
-                                .pop()
-                                .ok_or_else(|| Error::InvalidGitObject)?
-                                .parse::<u32>()
-                                .map_err(|_| Error::InvalidGitObject)?;
-                            let author_email_enclosing =
-                                author_info.pop().ok_or_else(|| Error::InvalidGitObject)?;
-
-                            author_email = author_email_enclosing
-                                [1..author_email_enclosing.len() - 1]
-                                .to_string();
-                            author_name = author_info.join(" ");
-                        }
-
-                        "committer" => {
-                            // same as author for us
-                        }
-                        _ => {}
-                    }
-                }
                 Ok(GitObject {
                     size,
                     hash: hash.to_string(),
                     object_bytes: None,
                     content: GitObjectContent::Commit {
-                        content: CommitObjects {
-                            timestamp,
-                            author_name,
-                            author_email,
-                            author_timezone,
-                            parents_sha,
-                            tree_sha,
-                            commit_msg,
-                        },
+                        content: commit_objects,
                     },
                 })
             }
@@ -245,6 +266,34 @@ impl GitObject {
         let mut content_bytes = Vec::new();
         reader.read_to_end(&mut content_bytes)?;
         Self::from_blob_content_bytes(content_bytes)
+    }
+
+    pub fn from_tree_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
+        let size = content_bytes.len();
+
+        let header = format!("tree {}", size);
+        let mut object_bytes = header.as_bytes().to_vec();
+        object_bytes.push(0);
+        object_bytes.extend(&content_bytes);
+        let hash = GitObject::get_hash_from_bytes(&object_bytes);
+
+        let mut reader = BufReader::new(&content_bytes[..]);
+        let mut content = Vec::new();
+        loop {
+            let tree_child = TreeChild::from_reader(&mut reader)?;
+            match tree_child {
+                None => break,
+                Some(tree_child) => {
+                    content.push(tree_child);
+                }
+            }
+        }
+        Ok(GitObject {
+            size,
+            content: GitObjectContent::Tree { content },
+            hash: hash.to_string(),
+            object_bytes: None,
+        })
     }
 
     pub fn from_dir<P: AsRef<Path>>(dir_path: P) -> Result<Self> {
@@ -309,6 +358,29 @@ impl GitObject {
         })
     }
 
+    pub fn from_commit_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
+        let size = content_bytes.len();
+
+        let header = format!("commit {}", size);
+        let mut object_bytes = header.as_bytes().to_vec();
+        object_bytes.push(0);
+        object_bytes.extend(&content_bytes);
+
+        let hash = GitObject::get_hash_from_bytes(&object_bytes);
+        let content = String::from_utf8(content_bytes).map_err(|_| Error::InvalidSmartHttpRes)?;
+
+        let commit_objects = CommitObjects::from_content(&content)?;
+
+        Ok(GitObject {
+            object_bytes: Some(object_bytes),
+            hash,
+            content: GitObjectContent::Commit {
+                content: commit_objects,
+            },
+            size,
+        })
+    }
+
     pub fn from_commit_objects(commit_objects: CommitObjects) -> Result<Self> {
         let mut content_bytes: Vec<u8> = Vec::new();
 
@@ -365,7 +437,7 @@ impl GitObject {
         })
     }
 
-    pub fn write(&self) -> Result<()> {
+    pub fn write(&self, recursive: bool) -> Result<()> {
         let (subdir, filename) = self.hash.split_at(2);
 
         let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
@@ -385,20 +457,19 @@ impl GitObject {
         let mut encoder = flate2::write::ZlibEncoder::new(output, flate2::Compression::default());
         encoder.write_all(&object_bytes)?;
 
-        match &self.content {
-            GitObjectContent::Tree { content } => {
+        // only applies to trees
+        if recursive {
+            if let GitObjectContent::Tree { content } = &self.content {
                 for tree_child in content {
                     tree_child
                         .git_object
                         .as_ref()
                         .ok_or_else(|| Error::TreeChildNotLoaded)?
-                        .write()?;
+                        .write(true)?;
                 }
-                Ok(())
             }
-            GitObjectContent::Blob { .. } => Ok(()),
-            GitObjectContent::Commit { .. } => Ok(()),
         }
+        Ok(())
     }
     pub fn content_type(&self) -> String {
         match self.content {

@@ -4,7 +4,7 @@ use std::{
 };
 
 use crate::{
-    git_object::{GitObject, GitObjectContent},
+    git_object::{GitObject, GitObjectContent, TreeChild},
     Error, Result,
 };
 
@@ -301,15 +301,39 @@ impl GitPack {
     }
 
     pub fn into_git_objects(self) -> Result<Vec<GitObject>> {
-        let mut obj_map = HashMap::<String, GitObject>::new();
+        let mut obj_map = HashMap::<String, usize>::new();
 
         let mut git_objects = Vec::new();
 
-        for git_pack_object in self.pack_objects {
+        for (i, git_pack_object) in self.pack_objects.into_iter().enumerate() {
             match git_pack_object {
                 GitPackObject::Blob { content_bytes } => {
                     let git_object = GitObject::from_blob_content_bytes(content_bytes)?;
+                    obj_map.insert(git_object.hash.clone(), i);
                     git_objects.push(git_object);
+                }
+                GitPackObject::Tree { content_bytes } => {
+                    let git_object = GitObject::from_tree_content_bytes(content_bytes)?;
+                    obj_map.insert(git_object.hash.clone(), i);
+                    git_objects.push(git_object);
+                }
+                GitPackObject::Commit { content_bytes } => {
+                    let git_object = GitObject::from_commit_content_bytes(content_bytes)?;
+                    obj_map.insert(git_object.hash.clone(), i);
+                    git_objects.push(git_object);
+                }
+                GitPackObject::Tag { .. } => {
+                    println!("tag not supported");
+                }
+                GitPackObject::RefDelta {
+                    base_object,
+                    content_bytes,
+                } => {
+                    if obj_map.contains_key(&base_object) {
+                        println!("OK");
+                    } else {
+                        println!("STRANGE");
+                    }
                 }
                 _ => {}
             }
