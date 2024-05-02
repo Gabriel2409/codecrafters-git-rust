@@ -183,13 +183,19 @@ impl GitPack {
         format!("0032want {}\n00000009done\n", head_hash).to_string()
     }
 
+    /// For most of the objects, in the first byte, we look at the MSB (leftmost bit).
+    /// If it is 1 it means the next byte is also part of the size. If it is 0, it means
+    /// we are on the last byte that is part of the size.
+    /// For the first byte, the left bits 2,3,4 define the object so the size only starts
+    /// on the last 4 bits.
+    /// For ex 1001_1111 0010_1100 => type is 001, size is 0010_1100_1111
+    /// valid object types are
+    /// - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
     pub fn get_next_object_type_and_size<R: Read>(reader: &mut R) -> Result<(usize, usize)> {
         let mut buf = [0];
         reader.read_exact(&mut buf)?;
         let mut cur_byte = buf[0] as usize; // usize to avoid overflow when shifting
 
-        // valid object types
-        // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
         let object_type = cur_byte >> 4 & 0b0111;
         // then last 4 bits are part of size
         // Note that the size corresponds to the size of the uncompressed object
@@ -210,6 +216,30 @@ impl GitPack {
             cur_size += additional_size;
         }
         Ok((object_type, cur_size))
+    }
+
+    /// After OBS_REF_DELTA (7), we have the base object (20 bits)
+    /// then the size of the base object and the size of the next object
+    /// Here for the size encoding, we don't need to reserve bits for the type
+    /// and so we can use 7 bits starting from the first byte
+    pub fn get_next_size_without_type<R: Read>(reader: &mut R) -> Result<usize> {
+        let mut buf = [0];
+        reader.read_exact(&mut buf)?;
+        let mut cur_byte = buf[0] as usize; // usize to avoid overflow when shifting
+
+        let mut cur_size = cur_byte & 0b1111111;
+
+        // while the MSB is 1,
+        //  it means that the 7 lower bits of the next byte are part of the size
+        let mut shift = 7;
+        while cur_byte >= 128 {
+            reader.read_exact(&mut buf)?;
+            cur_byte = buf[0] as usize;
+            let additional_size = (cur_byte & 0b01111111) << shift;
+            shift += 7;
+            cur_size += additional_size;
+        }
+        Ok(cur_size)
     }
 
     pub fn from_repository_url_and_pack_content(
@@ -294,10 +324,9 @@ impl GitPack {
                     let mut z = flate2::bufread::ZlibDecoder::new(reader);
 
                     // TODO: NOT SURE IT WORKS
-                    let (ty, si) = Self::get_next_object_type_and_size(&mut z)?;
-                    let (ty2, si2) = Self::get_next_object_type_and_size(&mut z)?;
-                    dbg!(ty, si);
-                    dbg!(ty2, si2);
+                    let ty = Self::get_next_size_without_type(&mut z)?;
+                    let ty2 = Self::get_next_size_without_type(&mut z)?;
+                    dbg!(ty, ty2);
 
                     z.read_to_end(&mut buf)?;
                     let git_pack_object = GitPackObject::RefDelta {
