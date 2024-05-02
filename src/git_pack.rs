@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{BufReader, Read},
+    io::{BufRead, BufReader, Read},
 };
 
 use crate::{
@@ -182,6 +182,36 @@ impl GitPack {
     pub fn create_minimal_pack_content_from_head_hash(head_hash: &str) -> String {
         format!("0032want {}\n00000009done\n", head_hash).to_string()
     }
+
+    pub fn get_next_object_type_and_size<R: Read>(reader: &mut R) -> Result<(usize, usize)> {
+        let mut buf = [0];
+        reader.read_exact(&mut buf)?;
+        let mut cur_byte = buf[0] as usize; // usize to avoid overflow when shifting
+
+        // valid object types
+        // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
+        let object_type = cur_byte >> 4 & 0b0111;
+        // then last 4 bits are part of size
+        // Note that the size corresponds to the size of the uncompressed object
+        // so we can not use it to read just the correct amount of bytes.
+        // Fortunately, when decompressing with Zlib, it will stop automatically
+        // at the EOF and we can then compare that the cur_size is equal to the
+        // size of the buffer
+        let mut cur_size = cur_byte & 0b1111;
+
+        // while the MSB is 1,
+        //  it means that the 7 lower bits of the next byte are part of the size
+        let mut shift = 4;
+        while cur_byte >= 128 {
+            reader.read_exact(&mut buf)?;
+            cur_byte = buf[0] as usize;
+            let additional_size = (cur_byte & 0b01111111) << shift;
+            shift += 7;
+            cur_size += additional_size;
+        }
+        Ok((object_type, cur_size))
+    }
+
     pub fn from_repository_url_and_pack_content(
         repository_url: &str,
         pack_content: &str,
@@ -221,31 +251,7 @@ impl GitPack {
         for _ in 0..nb_objects {
             println!();
 
-            let mut buf = [0];
-            reader.read_exact(&mut buf)?;
-            let mut cur_byte = buf[0] as usize; // usize to avoid overflow when shifting
-
-            // valid object types
-            // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
-            let object_type = cur_byte >> 4 & 0b0111;
-            // then last 4 bits are part of size
-            // Note that the size corresponds to the size of the uncompressed object
-            // so we can not use it to read just the correct amount of bytes.
-            // Fortunately, when decompressing with Zlib, it will stop automatically
-            // at the EOF and we can then compare that the cur_size is equal to the
-            // size of the buffer
-            let mut cur_size = cur_byte & 0b1111;
-
-            // while the MSB is 1,
-            //  it means that the 7 lower bits of the next byte are part of the size
-            let mut shift = 4;
-            while cur_byte >= 128 {
-                reader.read_exact(&mut buf)?;
-                cur_byte = buf[0] as usize;
-                let additional_size = (cur_byte & 0b01111111) << shift;
-                shift += 7;
-                cur_size += additional_size;
-            }
+            let (object_type, cur_size) = Self::get_next_object_type_and_size(&mut reader)?;
 
             match object_type {
                 1..=4 => {
@@ -281,10 +287,18 @@ impl GitPack {
                     // after the size, we get the base object name
                     let mut base_object = vec![0; 20];
                     reader.read_exact(&mut base_object)?;
+                    dbg!(hex::encode(&base_object));
 
                     // then the diff as zlib compressed data
                     let mut buf = Vec::new();
                     let mut z = flate2::bufread::ZlibDecoder::new(reader);
+
+                    // TODO: NOT SURE IT WORKS
+                    let (ty, si) = Self::get_next_object_type_and_size(&mut z)?;
+                    let (ty2, si2) = Self::get_next_object_type_and_size(&mut z)?;
+                    dbg!(ty, si);
+                    dbg!(ty2, si2);
+
                     z.read_to_end(&mut buf)?;
                     let git_pack_object = GitPackObject::RefDelta {
                         base_object: hex::encode(base_object),
@@ -338,6 +352,10 @@ impl GitPack {
                 _ => {}
             }
         }
+        let a = dbg!(obj_map
+            .get("718a9b3efbd49b0c896cf632d81a6cdc6e673806")
+            .unwrap());
+        dbg!(&git_objects[*a]);
         Ok(git_objects)
     }
 }
