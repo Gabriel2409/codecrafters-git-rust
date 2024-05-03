@@ -26,14 +26,7 @@ pub fn git_clone<P: AsRef<Path> + ?Sized>(repository_url: &str, directory: &P) -
         _ => panic!("AA"),
     };
     let tree = GitObject::from_hash(&main_tree_sha, directory)?;
-    match tree.content {
-        GitObjectContent::Tree { content } => {
-            for tree_child in content {
-                tree_child.restore_content(directory)?;
-            }
-        }
-        _ => panic!("BB"),
-    }
+    tree.restore_directory(directory)?;
 
     Ok(())
 }

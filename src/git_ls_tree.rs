@@ -36,7 +36,7 @@ pub fn git_ls_tree(name_only: bool, recursive: bool, long: bool, hash: &str) -> 
                 }
             }
         } // Return Ok(()) on success
-        _ => Err(Error::NotATreeGitObject(hash.to_string()))?,
+        _ => Err(Error::NotATreeGitObject)?,
     }
 
     Ok(())

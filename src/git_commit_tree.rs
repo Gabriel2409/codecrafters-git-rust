@@ -1,6 +1,7 @@
 use crate::git_object::{CommitObjects, GitObject};
 use crate::Result;
 
+/// Writes the given commit to the .git folder of the current directory
 pub fn git_commit_tree(tree_sha: &str, parent_commit_sha: &str, message: &str) -> Result<()> {
     let commit_objects = CommitObjects {
         timestamp: 1714305310,

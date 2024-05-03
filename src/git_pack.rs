@@ -262,16 +262,6 @@ impl GitPack {
         Ok(cur_size)
     }
 
-    pub fn find_highest_multiple_bit_pos(num: usize, multiple_bit: usize) -> usize {
-        let mut pos = 0;
-        let mut num = num;
-        while num > 0 {
-            pos += 1;
-            num >>= multiple_bit;
-        }
-        pos
-    }
-
     pub fn from_repository_url_and_pack_content(
         repository_url: &str,
         pack_content: &str,
@@ -309,8 +299,6 @@ impl GitPack {
         // then for the packfile itself, we iterate through all the objects
         let mut pack_objects = Vec::new();
         for _ in 0..nb_objects {
-            println!();
-
             let (object_type, cur_size) = Self::get_next_object_type_and_size(&mut reader)?;
 
             match object_type {
@@ -352,46 +340,12 @@ impl GitPack {
                     let mut buf = Vec::new();
                     let mut z = flate2::bufread::ZlibDecoder::new(reader);
 
-                    z.read_to_end(&mut buf);
+                    let _ = z.read_to_end(&mut buf)?;
                     let git_pack_object = GitPackObject::RefDelta {
                         base_object_hash: hex::encode(base_object),
                         content_bytes: buf,
                     };
 
-                    // let base_object_size = Self::get_next_size_without_type(&mut z)?;
-                    // let reconstructed_object_size = Self::get_next_size_without_type(&mut z)?;
-                    //
-                    // // TODO: probably a better way to do it
-                    // // but we can easily retrieve the nb of bytes needed for the size as we use
-                    // // 7 bits per byte
-                    // let nb_bytes_base_object_size =
-                    //     Self::find_highest_multiple_bit_pos(base_object_size, 7);
-                    // let nb_bytes_reconstructed_object_size =
-                    //     Self::find_highest_multiple_bit_pos(reconstructed_object_size, 7);
-                    //
-                    // z.read_to_end(&mut buf)?;
-                    //
-                    // if buf.len() + nb_bytes_base_object_size + nb_bytes_reconstructed_object_size
-                    //     != cur_size
-                    // {
-                    //     return Err(Error::IncorrectPackObjectSize {
-                    //         expected: cur_size,
-                    //         got: buf.len(),
-                    //     });
-                    // }
-                    //
-                    // dbg!(
-                    //     base_object_size,
-                    //     reconstructed_object_size,
-                    //     cur_size,
-                    //     buf.len()
-                    // );
-                    // let git_pack_object = GitPackObject::RefDelta {
-                    //     base_object_hash: hex::encode(base_object),
-                    //     content_bytes: buf,
-                    //     base_object_size,
-                    //     reconstructed_object_size,
-                    // };
                     pack_objects.push(git_pack_object);
                     reader = z.into_inner();
                 }
@@ -518,7 +472,6 @@ impl GitPack {
                         GitObjectContent::Commit { .. } => {
                             GitObject::from_commit_content_bytes(reconstructed_content)?
                         }
-                        _ => todo!(),
                     };
                     if git_object.size != reconstructed_object_size {
                         return Err(Error::WrongObjectSize {
@@ -530,8 +483,6 @@ impl GitPack {
                     git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
-
-                _ => {}
             }
         }
         Ok(git_objects)

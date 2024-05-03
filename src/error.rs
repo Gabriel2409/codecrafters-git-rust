@@ -6,7 +6,7 @@ pub type Result<T> = core::result::Result<T, Error>;
 pub enum Error {
     InvalidHash(String),
     InvalidGitObject,
-    NotATreeGitObject(String),
+    NotATreeGitObject,
     TreeChildNotLoaded,
     ObjectBytesNotLoaded,
     Unreachable,

@@ -10,19 +10,24 @@ use std::path::PathBuf;
 use crate::{Error, Result};
 
 #[derive(Debug)]
-/// content is optional because we don't need to retrieve it for every git functions
+/// Content of a given GitObject
 pub enum GitObjectContent {
     Blob { content: String },
     Tree { content: Vec<TreeChild> },
     Commit { content: CommitObjects },
 }
 
+/// Tree points to a git object but also have additional information
+/// such as the name and the mode of said object
 #[derive(Debug)]
 pub struct TreeChild {
+    /// Different values for dir and blob (100644 for files, 40000 for dirs)
     pub mode: u32,
     /// Do not store the full child object when unnecessary
     pub git_object: Option<GitObject>,
+    /// hash of underlying git object
     pub hash: String,
+    /// name of the file
     pub name: String,
 }
 
@@ -59,7 +64,8 @@ impl TreeChild {
         }))
     }
 
-    pub fn restore_content<P: AsRef<Path> + ?Sized>(self, parent_dir: &P) -> Result<()> {
+    /// uses name and child content to recreate it in the target dir
+    pub fn restore_directory<P: AsRef<Path> + ?Sized>(self, parent_dir: &P) -> Result<()> {
         std::fs::create_dir_all(parent_dir.as_ref())?;
         let git_object = self.git_object.ok_or_else(|| Error::TreeChildNotLoaded)?;
 
@@ -71,7 +77,7 @@ impl TreeChild {
             }
             GitObjectContent::Tree { content } => {
                 for tree_child in content {
-                    tree_child.restore_content(&child)?;
+                    tree_child.restore_directory(&child)?;
                 }
             }
             _ => Err(Error::InvalidGitObject)?,
@@ -94,6 +100,7 @@ pub struct CommitObjects {
 }
 
 impl CommitObjects {
+    /// Parses a string (decoded by zlib) to create the objects
     pub fn from_content(content: &str) -> Result<Self> {
         // TODO: may fail if empty commit msg
         let (beginning, commit_msg) = content
@@ -164,10 +171,12 @@ pub struct GitObject {
     pub content: GitObjectContent,
     /// Contains the bytes that are used to compute the hash
     /// Only set when loading from blob, or dir but not from hash
+    /// to avoid unnecessary storage
     pub object_bytes: Option<Vec<u8>>,
 }
 
 impl GitObject {
+    /// Helper function to compute the hash of a vector of bytes
     pub fn get_hash_from_bytes(bytes: &[u8]) -> String {
         let mut hasher = Sha1::new();
         hasher.update(bytes);
@@ -176,6 +185,9 @@ impl GitObject {
         format!("{digest:x}")
     }
 
+    /// Create a git object based on the hash in hexadecimal format.
+    /// Under the hood, locates the file in the .git/objects folder of the
+    /// repository_directory
     pub fn from_hash<P: AsRef<Path> + ?Sized>(
         hash: &str,
         repository_directory: &P,
@@ -261,6 +273,7 @@ impl GitObject {
         }
     }
 
+    /// Creates a blob object from content bytes (header not included)
     pub fn from_blob_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
         let size = content_bytes.len();
 
@@ -280,21 +293,7 @@ impl GitObject {
         })
     }
 
-    pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<Self> {
-        let file = File::open(&file_path)?;
-        // let size = file.metadata()?.len() as usize;
-
-        let mut reader = BufReader::new(file);
-
-        // let mut content = String::new();
-        // reader.read_to_string(&mut content)?;
-        // reader.seek(SeekFrom::Start(0))?;
-
-        let mut content_bytes = Vec::new();
-        reader.read_to_end(&mut content_bytes)?;
-        Self::from_blob_content_bytes(content_bytes)
-    }
-
+    /// Creates a tree object from content bytes (header not included)
     pub fn from_tree_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
         let size = content_bytes.len();
 
@@ -323,6 +322,47 @@ impl GitObject {
         })
     }
 
+    /// Creates a commit object from content bytes (header not included)
+    pub fn from_commit_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
+        let size = content_bytes.len();
+
+        let header = format!("commit {}", size);
+        let mut object_bytes = header.as_bytes().to_vec();
+        object_bytes.push(0);
+        object_bytes.extend(&content_bytes);
+
+        let hash = GitObject::get_hash_from_bytes(&object_bytes);
+        let content = String::from_utf8(content_bytes).map_err(|_| Error::InvalidSmartHttpRes)?;
+
+        let commit_objects = CommitObjects::from_content(&content)?;
+
+        Ok(GitObject {
+            object_bytes: Some(object_bytes),
+            hash,
+            content: GitObjectContent::Commit {
+                content: commit_objects,
+            },
+            size,
+        })
+    }
+
+    /// Creates a git blob object from a file.
+    pub fn from_blob<P: AsRef<Path>>(file_path: P) -> Result<Self> {
+        let file = File::open(&file_path)?;
+        // let size = file.metadata()?.len() as usize;
+
+        let mut reader = BufReader::new(file);
+
+        // let mut content = String::new();
+        // reader.read_to_string(&mut content)?;
+        // reader.seek(SeekFrom::Start(0))?;
+
+        let mut content_bytes = Vec::new();
+        reader.read_to_end(&mut content_bytes)?;
+        Self::from_blob_content_bytes(content_bytes)
+    }
+
+    /// Creates a tree object from a directory
     pub fn from_dir<P: AsRef<Path>>(dir_path: P) -> Result<Self> {
         let parent_dir = read_dir(dir_path)?;
 
@@ -385,29 +425,6 @@ impl GitObject {
         })
     }
 
-    pub fn from_commit_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
-        let size = content_bytes.len();
-
-        let header = format!("commit {}", size);
-        let mut object_bytes = header.as_bytes().to_vec();
-        object_bytes.push(0);
-        object_bytes.extend(&content_bytes);
-
-        let hash = GitObject::get_hash_from_bytes(&object_bytes);
-        let content = String::from_utf8(content_bytes).map_err(|_| Error::InvalidSmartHttpRes)?;
-
-        let commit_objects = CommitObjects::from_content(&content)?;
-
-        Ok(GitObject {
-            object_bytes: Some(object_bytes),
-            hash,
-            content: GitObjectContent::Commit {
-                content: commit_objects,
-            },
-            size,
-        })
-    }
-
     pub fn from_commit_objects(commit_objects: CommitObjects) -> Result<Self> {
         let mut content_bytes: Vec<u8> = Vec::new();
 
@@ -464,6 +481,23 @@ impl GitObject {
         })
     }
 
+    /// Restores a tree object in a directory
+    pub fn restore_directory<P: AsRef<Path> + ?Sized>(self, directory: &P) -> Result<()> {
+        match self.content {
+            GitObjectContent::Tree { content } => {
+                for tree_child in content {
+                    tree_child.restore_directory(directory)?;
+                }
+            }
+            _ => Err(Error::NotATreeGitObject)?,
+        }
+        Ok(())
+    }
+
+    /// Writes the object to the .git folder of the repository_directory
+    /// If recursive is set to true, tree objects will also write all their child objects
+    /// Note that recursive has no effects on commit objects as they only store the
+    /// sha of the main tree and not the actual object itself in this implementation
     pub fn write<P: AsRef<Path> + ?Sized>(
         &self,
         repository_directory: &P,
@@ -503,6 +537,8 @@ impl GitObject {
         }
         Ok(())
     }
+
+    /// Blob => "blob", Tree => "tree", Commit => "commit"
     pub fn content_type(&self) -> String {
         match self.content {
             GitObjectContent::Blob { .. } => "blob".to_owned(),
