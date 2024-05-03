@@ -176,13 +176,15 @@ impl GitObject {
         format!("{digest:x}")
     }
 
-    pub fn from_hash(hash: &str) -> Result<Self> {
+    pub fn from_hash(hash: &str, repo_directory: &str) -> Result<Self> {
         if hash.len() != 40 {
             Err(Error::InvalidHash(hash.to_owned()))?;
         }
         let (subdir, filename) = hash.split_at(2);
 
-        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
+        let location: PathBuf = [repo_directory, ".git", "objects", subdir, filename]
+            .iter()
+            .collect();
 
         let file = File::open(location)?;
 
@@ -213,7 +215,8 @@ impl GitObject {
                         None => break,
                         Some(mut tree_child) => {
                             // loads the underlying git object
-                            tree_child.git_object = Some(GitObject::from_hash(&tree_child.hash)?);
+                            tree_child.git_object =
+                                Some(GitObject::from_hash(&tree_child.hash, repo_directory)?);
                             content.push(tree_child);
                         }
                     }
@@ -457,10 +460,12 @@ impl GitObject {
         })
     }
 
-    pub fn write(&self, recursive: bool) -> Result<()> {
+    pub fn write(&self, repository_directory: &str, recursive: bool) -> Result<()> {
         let (subdir, filename) = self.hash.split_at(2);
 
-        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
+        let location: PathBuf = [repository_directory, ".git", "objects", subdir, filename]
+            .iter()
+            .collect();
 
         let parent = location.parent().ok_or_else(|| Error::InvalidGitObject)?;
         create_dir_all(parent)?;
@@ -485,7 +490,7 @@ impl GitObject {
                         .git_object
                         .as_ref()
                         .ok_or_else(|| Error::TreeChildNotLoaded)?
-                        .write(true)?;
+                        .write(&repository_directory, true)?;
                 }
             }
         }

@@ -111,7 +111,7 @@ fn main() -> Result<()> {
     // You can check for the existence of subcommands, and if found use their
     // matches just as you would the top level cmd
     match &cli.command {
-        Commands::Init => git_init()?,
+        Commands::Init => git_init(".")?,
         // TODO: There must be a better way. Can we have incompatible args as an enum?
         Commands::CatFile {
             pretty_print,

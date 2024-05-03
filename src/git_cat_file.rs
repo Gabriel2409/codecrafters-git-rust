@@ -8,7 +8,7 @@ pub fn git_cat_file(
     size: bool,
     hash: &str,
 ) -> Result<()> {
-    let git_obj = GitObject::from_hash(hash)?;
+    let git_obj = GitObject::from_hash(hash, ".")?;
 
     // TODO: would be better with an enum
     if exit_with_zero_status_if_exists {

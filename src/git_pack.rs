@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::{BufRead, BufReader, Read},
+    path::Path,
 };
 
 use crate::{
@@ -35,10 +36,10 @@ pub struct UploadPackDiscovery {
     pub refs: Vec<(String, String)>,
 }
 impl UploadPackDiscovery {
-    pub fn write_head_and_refs(&self) -> Result<()> {
-        std::fs::write(".git/HEAD", self.head_hash.clone())?;
+    pub fn write_head_and_refs(&self, repo_dir: &str) -> Result<()> {
+        std::fs::write(format!("{}/.git/HEAD", repo_dir), self.head_hash.clone())?;
         for (hash, name) in &self.refs {
-            let filename = format!(".git/{name}");
+            let filename = format!("{}/.git/{}", repo_dir, name);
             let parent = std::path::Path::new(&filename).parent().unwrap();
             std::fs::create_dir_all(parent)?;
             std::fs::write(filename, hash)?;
@@ -397,7 +398,7 @@ impl GitPack {
         Ok(GitPack { pack_objects })
     }
 
-    pub fn into_git_objects(self) -> Result<Vec<GitObject>> {
+    pub fn into_git_objects(self, repository_directory: &str) -> Result<Vec<GitObject>> {
         let mut obj_map = HashMap::<String, usize>::new();
 
         let mut git_objects = Vec::new();
@@ -407,19 +408,19 @@ impl GitPack {
                 GitPackObject::Blob { content_bytes } => {
                     let git_object = GitObject::from_blob_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_object.write(false)?;
+                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tree { content_bytes } => {
                     let git_object = GitObject::from_tree_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_object.write(false)?;
+                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Commit { content_bytes } => {
                     let git_object = GitObject::from_commit_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_object.write(false)?;
+                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tag { .. } => {
@@ -522,7 +523,7 @@ impl GitPack {
                     }
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
                     dbg!(&git_object.hash);
-                    git_object.write(false)?;
+                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
 
