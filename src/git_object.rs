@@ -162,7 +162,7 @@ impl GitObject {
         }
         let (subdir, filename) = hash.split_at(2);
 
-        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
+        let location: PathBuf = ["ww", ".git", "objects", subdir, filename].iter().collect();
 
         let file = File::open(location)?;
 
@@ -440,7 +440,7 @@ impl GitObject {
     pub fn write(&self, recursive: bool) -> Result<()> {
         let (subdir, filename) = self.hash.split_at(2);
 
-        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
+        let location: PathBuf = ["ww", ".git", "objects", subdir, filename].iter().collect();
 
         let parent = location.parent().ok_or_else(|| Error::InvalidGitObject)?;
         create_dir_all(parent)?;

@@ -168,8 +168,8 @@ pub enum GitPackObject {
     },
     RefDelta {
         base_object_hash: String,
-        base_object_size: usize,
-        reconstructed_object_size: usize,
+        // base_object_size: usize,
+        // reconstructed_object_size: usize,
         content_bytes: Vec<u8>,
     },
 }
@@ -336,40 +336,46 @@ impl GitPack {
                     let mut buf = Vec::new();
                     let mut z = flate2::bufread::ZlibDecoder::new(reader);
 
-                    let base_object_size = Self::get_next_size_without_type(&mut z)?;
-                    let reconstructed_object_size = Self::get_next_size_without_type(&mut z)?;
-
-                    // TODO: probably a better way to do it
-                    // but we can easily retrieve the nb of bytes needed for the size as we use
-                    // 7 bits per byte
-                    let nb_bytes_base_object_size =
-                        Self::find_highest_multiple_bit_pos(base_object_size, 7);
-                    let nb_bytes_reconstructed_object_size =
-                        Self::find_highest_multiple_bit_pos(reconstructed_object_size, 7);
-
-                    z.read_to_end(&mut buf)?;
-
-                    if buf.len() + nb_bytes_base_object_size + nb_bytes_reconstructed_object_size
-                        != cur_size
-                    {
-                        return Err(Error::IncorrectPackObjectSize {
-                            expected: cur_size,
-                            got: buf.len(),
-                        });
-                    }
-
-                    dbg!(
-                        base_object_size,
-                        reconstructed_object_size,
-                        cur_size,
-                        buf.len()
-                    );
+                    z.read_to_end(&mut buf);
                     let git_pack_object = GitPackObject::RefDelta {
                         base_object_hash: hex::encode(base_object),
                         content_bytes: buf,
-                        base_object_size,
-                        reconstructed_object_size,
                     };
+
+                    // let base_object_size = Self::get_next_size_without_type(&mut z)?;
+                    // let reconstructed_object_size = Self::get_next_size_without_type(&mut z)?;
+                    //
+                    // // TODO: probably a better way to do it
+                    // // but we can easily retrieve the nb of bytes needed for the size as we use
+                    // // 7 bits per byte
+                    // let nb_bytes_base_object_size =
+                    //     Self::find_highest_multiple_bit_pos(base_object_size, 7);
+                    // let nb_bytes_reconstructed_object_size =
+                    //     Self::find_highest_multiple_bit_pos(reconstructed_object_size, 7);
+                    //
+                    // z.read_to_end(&mut buf)?;
+                    //
+                    // if buf.len() + nb_bytes_base_object_size + nb_bytes_reconstructed_object_size
+                    //     != cur_size
+                    // {
+                    //     return Err(Error::IncorrectPackObjectSize {
+                    //         expected: cur_size,
+                    //         got: buf.len(),
+                    //     });
+                    // }
+                    //
+                    // dbg!(
+                    //     base_object_size,
+                    //     reconstructed_object_size,
+                    //     cur_size,
+                    //     buf.len()
+                    // );
+                    // let git_pack_object = GitPackObject::RefDelta {
+                    //     base_object_hash: hex::encode(base_object),
+                    //     content_bytes: buf,
+                    //     base_object_size,
+                    //     reconstructed_object_size,
+                    // };
                     pack_objects.push(git_pack_object);
                     reader = z.into_inner();
                 }
@@ -390,16 +396,19 @@ impl GitPack {
                 GitPackObject::Blob { content_bytes } => {
                     let git_object = GitObject::from_blob_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
+                    git_object.write(false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tree { content_bytes } => {
                     let git_object = GitObject::from_tree_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
+                    git_object.write(false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Commit { content_bytes } => {
                     let git_object = GitObject::from_commit_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
+                    git_object.write(false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tag { .. } => {
@@ -408,33 +417,111 @@ impl GitPack {
                 GitPackObject::RefDelta {
                     base_object_hash,
                     content_bytes,
-                    base_object_size,
-                    reconstructed_object_size,
                 } => {
-                    if obj_map.contains_key(&base_object_hash) {
-                        let real_base_object_size =
-                            git_objects[*obj_map.get(&base_object_hash).unwrap()].size;
-                        if real_base_object_size != base_object_size {
-                            Err(Error::WrongObjectSize {
-                                expected: real_base_object_size,
-                                got: base_object_size,
-                            })?;
-                        }
+                    let base_object = &git_objects[*obj_map
+                        .get(&base_object_hash)
+                        .ok_or_else(|| Error::ObjectNotFound(base_object_hash.to_string()))?];
 
-                        // TODO: actual construction of the object
+                    let base_bytes = base_object
+                        .object_bytes
+                        .clone()
+                        .ok_or_else(|| Error::ObjectBytesNotLoaded)?;
 
-                        println!("{:08b}", content_bytes[0])
-                    } else {
-                        println!("STRANGE");
+                    let mut reader = BufReader::new(&content_bytes[..]);
+                    let expected_base_object_size = Self::get_next_size_without_type(&mut reader)?;
+                    let reconstructed_object_size = Self::get_next_size_without_type(&mut reader)?;
+
+                    if base_object.size != expected_base_object_size {
+                        Err(Error::WrongObjectSize {
+                            expected: base_object.size,
+                            got: expected_base_object_size,
+                        })?;
                     }
+
+                    // TODO: actual construction of the object
+                    let mut cur_size = 0;
+
+                    let mut reconstructed_content = Vec::new();
+                    while cur_size != reconstructed_object_size {
+                        let mut buf = [0];
+                        reader.read_exact(&mut buf)?;
+                        let first_byte = buf[0];
+
+                        let instruction = first_byte >> 7;
+                        dbg!(cur_size, reconstructed_object_size, instruction);
+
+                        if instruction == 0 {
+                            let size = first_byte as usize;
+                            dbg!(size);
+
+                            let mut data = vec![0; size];
+
+                            reader.read_exact(&mut data)?;
+                            cur_size += data.len();
+                            reconstructed_content.extend(data);
+                        } else {
+                            let mut buffer = [0u8; 1];
+                            let mut offset = 0;
+                            let mut size = 0;
+
+                            for i in 0..4 {
+                                if first_byte & (1u8 << i) != 0 {
+                                    reader.read_exact(&mut buffer)?;
+
+                                    offset += (buffer[0] as usize) << (8 * i);
+                                }
+                            }
+
+                            for i in 0..3 {
+                                if first_byte & (1u8 << (i + 4)) != 0 {
+                                    reader.read_exact(&mut buffer)?;
+
+                                    size += (buffer[0] as usize) << (8 * i);
+                                }
+                            }
+
+                            let mut base_reader = BufReader::new(&base_bytes[..]);
+                            let mut header_bytes = Vec::new();
+                            base_reader.read_until(0, &mut header_bytes)?;
+                            let mut data = Vec::new();
+
+                            base_reader.read_to_end(&mut data)?;
+
+                            reconstructed_content.extend(&data[offset..offset + size]);
+                            cur_size += size;
+                        }
+                    }
+                    let git_object = match base_object.content {
+                        GitObjectContent::Blob { .. } => {
+                            GitObject::from_blob_content_bytes(reconstructed_content)?
+                        }
+                        GitObjectContent::Tree { .. } => {
+                            GitObject::from_tree_content_bytes(reconstructed_content)?
+                        }
+                        GitObjectContent::Commit { .. } => {
+                            GitObject::from_commit_content_bytes(reconstructed_content)?
+                        }
+                        _ => todo!(),
+                    };
+                    if git_object.size != reconstructed_object_size {
+                        return Err(Error::WrongObjectSize {
+                            expected: reconstructed_object_size,
+                            got: git_object.size,
+                        });
+                    }
+                    obj_map.insert(git_object.hash.clone(), git_objects.len());
+                    dbg!(&git_object.hash);
+                    git_object.write(false)?;
+                    git_objects.push(git_object);
                 }
+
                 _ => {}
             }
         }
-        let a = dbg!(obj_map
-            .get("718a9b3efbd49b0c896cf632d81a6cdc6e673806")
-            .unwrap());
-        dbg!(&git_objects[*a]);
+        // let a = dbg!(obj_map
+        //     .get("718a9b3efbd49b0c896cf632d81a6cdc6e673806")
+        //     .unwrap());
+        // dbg!(&git_objects[*a]);
         Ok(git_objects)
     }
 }

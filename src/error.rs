@@ -31,6 +31,7 @@ pub enum Error {
         expected: usize,
         got: usize,
     },
+    ObjectNotFound(String),
     // -- Externals
     #[from]
     Io(std::io::Error),
