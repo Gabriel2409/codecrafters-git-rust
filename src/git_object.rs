@@ -58,6 +58,26 @@ impl TreeChild {
             git_object: None,
         }))
     }
+
+    pub fn restore_content(self, parent_dir: &str) -> Result<()> {
+        std::fs::create_dir_all(parent_dir)?;
+        let git_object = self.git_object.ok_or_else(|| Error::TreeChildNotLoaded)?;
+
+        match git_object.content {
+            GitObjectContent::Blob { content } => {
+                let filename = format!("{}/{}", parent_dir, self.name);
+                std::fs::write(filename, content)?;
+            }
+            GitObjectContent::Tree { content } => {
+                for tree_child in content {
+                    let new_parent_dir = format!("{}/{}", parent_dir, self.name);
+                    tree_child.restore_content(&new_parent_dir)?;
+                }
+            }
+            _ => Err(Error::InvalidGitObject)?,
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -162,7 +182,7 @@ impl GitObject {
         }
         let (subdir, filename) = hash.split_at(2);
 
-        let location: PathBuf = ["ww", ".git", "objects", subdir, filename].iter().collect();
+        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
 
         let file = File::open(location)?;
 
@@ -440,7 +460,7 @@ impl GitObject {
     pub fn write(&self, recursive: bool) -> Result<()> {
         let (subdir, filename) = self.hash.split_at(2);
 
-        let location: PathBuf = ["ww", ".git", "objects", subdir, filename].iter().collect();
+        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
 
         let parent = location.parent().ok_or_else(|| Error::InvalidGitObject)?;
         create_dir_all(parent)?;

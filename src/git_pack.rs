@@ -35,6 +35,17 @@ pub struct UploadPackDiscovery {
     pub refs: Vec<(String, String)>,
 }
 impl UploadPackDiscovery {
+    pub fn write_head_and_refs(&self) -> Result<()> {
+        std::fs::write(".git/HEAD", self.head_hash.clone())?;
+        for (hash, name) in &self.refs {
+            let filename = format!(".git/{name}");
+            let parent = std::path::Path::new(&filename).parent().unwrap();
+            std::fs::create_dir_all(parent)?;
+            std::fs::write(filename, hash)?;
+        }
+        Ok(())
+    }
+
     /// Size is encoded on 4 bytes, in hexadecimal
     pub fn get_line_size<R: Read>(reader: &mut R) -> Result<usize> {
         let size_encoding_len = 4;
