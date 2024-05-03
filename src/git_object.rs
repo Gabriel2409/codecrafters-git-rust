@@ -292,7 +292,7 @@ impl GitObject {
             size,
             content: GitObjectContent::Tree { content },
             hash: hash.to_string(),
-            object_bytes: None,
+            object_bytes: Some(object_bytes),
         })
     }
 
