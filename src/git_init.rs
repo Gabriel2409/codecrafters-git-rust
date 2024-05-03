@@ -2,6 +2,7 @@ use std::{fs, path::Path};
 
 use crate::Result;
 
+/// Initialises a git repo in the target directory
 pub fn git_init<P: ?Sized + AsRef<Path>>(directory_path: &P) -> Result<()> {
     fs::create_dir_all(directory_path)?;
     let git_dir = directory_path.as_ref().join(".git");

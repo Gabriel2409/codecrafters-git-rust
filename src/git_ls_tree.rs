@@ -1,6 +1,7 @@
 use crate::git_object::{GitObject, GitObjectContent};
 use crate::{Error, Result};
 
+/// Prints informations about a tree
 pub fn git_ls_tree(name_only: bool, recursive: bool, long: bool, hash: &str) -> Result<()> {
     let git_obj = GitObject::from_hash(hash, ".")?;
 

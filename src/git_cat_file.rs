@@ -1,6 +1,8 @@
 use crate::git_object::{GitObject, GitObjectContent};
 use crate::{Error, Result};
 
+/// Output the contents or other properties such as size or type
+/// for the git objects in the current directory
 pub fn git_cat_file(
     pretty_print: bool,
     exit_with_zero_status_if_exists: bool,
@@ -39,7 +41,6 @@ pub fn git_cat_file(
             }
 
             GitObjectContent::Tree { content } => {
-                // NOTE: I could implement display instead for TreeAttributes
                 for tree_child in content {
                     match tree_child.git_object {
                         Some(git_obj) => {
