@@ -9,6 +9,8 @@ mod git_object;
 mod git_pack;
 mod git_write_tree;
 
+use std::path::PathBuf;
+
 pub use error::{Error, Result};
 use git_cat_file::git_cat_file;
 use git_clone::git_clone;
@@ -97,11 +99,12 @@ enum Commands {
         #[arg(short, help = "commit message")]
         message: String,
     },
+    /// Clones a repository url in a target directory
     Clone {
         #[arg(help = "url of the repository to clone")]
         repository_url: String,
         #[arg(help = "directory to clone into")]
-        directory: Option<String>,
+        directory: Option<PathBuf>,
     },
 }
 
@@ -146,11 +149,14 @@ fn main() -> Result<()> {
             directory,
         } => {
             let directory = match directory {
-                None => repository_url.split('/').last().ok_or(Error::Unreachable)?,
-                Some(directory) => directory,
+                None => {
+                    let dirname = repository_url.split('/').last().ok_or(Error::Unreachable)?;
+                    std::path::PathBuf::from(dirname)
+                }
+                Some(directory) => directory.clone(),
             };
 
-            git_clone(repository_url, directory)?
+            git_clone(repository_url, &directory)?
         }
     };
     Ok(())

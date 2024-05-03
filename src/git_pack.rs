@@ -5,7 +5,7 @@ use std::{
 };
 
 use crate::{
-    git_object::{GitObject, GitObjectContent, TreeChild},
+    git_object::{GitObject, GitObjectContent},
     Error, Result,
 };
 
@@ -36,10 +36,15 @@ pub struct UploadPackDiscovery {
     pub refs: Vec<(String, String)>,
 }
 impl UploadPackDiscovery {
-    pub fn write_head_and_refs(&self, repo_dir: &str) -> Result<()> {
-        std::fs::write(format!("{}/.git/HEAD", repo_dir), self.head_hash.clone())?;
+    pub fn write_head_and_refs<P: AsRef<Path> + ?Sized>(&self, repo_dir: &P) -> Result<()> {
+        let git_dir = repo_dir.as_ref().join(".git");
+        let head_file = git_dir.join("HEAD");
+
+        std::fs::write(head_file, self.head_hash.clone())?;
         for (hash, name) in &self.refs {
-            let filename = format!("{}/.git/{}", repo_dir, name);
+            // Note: name can contain slash
+            // TODO: make windows resilient?
+            let filename = git_dir.join(name);
             let parent = std::path::Path::new(&filename).parent().unwrap();
             std::fs::create_dir_all(parent)?;
             std::fs::write(filename, hash)?;
@@ -342,7 +347,6 @@ impl GitPack {
                     // after the size, we get the base object name
                     let mut base_object = vec![0; 20];
                     reader.read_exact(&mut base_object)?;
-                    dbg!(hex::encode(&base_object));
 
                     // then the diff as zlib compressed data
                     let mut buf = Vec::new();
@@ -398,7 +402,10 @@ impl GitPack {
         Ok(GitPack { pack_objects })
     }
 
-    pub fn into_git_objects(self, repository_directory: &str) -> Result<Vec<GitObject>> {
+    pub fn into_git_objects<P: AsRef<Path> + ?Sized>(
+        self,
+        repository_directory: &P,
+    ) -> Result<Vec<GitObject>> {
         let mut obj_map = HashMap::<String, usize>::new();
 
         let mut git_objects = Vec::new();
@@ -460,11 +467,9 @@ impl GitPack {
                         let first_byte = buf[0];
 
                         let instruction = first_byte >> 7;
-                        dbg!(cur_size, reconstructed_object_size, instruction);
 
                         if instruction == 0 {
                             let size = first_byte as usize;
-                            dbg!(size);
 
                             let mut data = vec![0; size];
 
@@ -522,7 +527,6 @@ impl GitPack {
                         });
                     }
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    dbg!(&git_object.hash);
                     git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
@@ -530,10 +534,6 @@ impl GitPack {
                 _ => {}
             }
         }
-        // let a = dbg!(obj_map
-        //     .get("718a9b3efbd49b0c896cf632d81a6cdc6e673806")
-        //     .unwrap());
-        // dbg!(&git_objects[*a]);
         Ok(git_objects)
     }
 }

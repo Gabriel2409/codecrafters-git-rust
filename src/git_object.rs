@@ -59,19 +59,19 @@ impl TreeChild {
         }))
     }
 
-    pub fn restore_content(self, parent_dir: &str) -> Result<()> {
-        std::fs::create_dir_all(parent_dir)?;
+    pub fn restore_content<P: AsRef<Path> + ?Sized>(self, parent_dir: &P) -> Result<()> {
+        std::fs::create_dir_all(parent_dir.as_ref())?;
         let git_object = self.git_object.ok_or_else(|| Error::TreeChildNotLoaded)?;
+
+        let child = parent_dir.as_ref().join(self.name);
 
         match git_object.content {
             GitObjectContent::Blob { content } => {
-                let filename = format!("{}/{}", parent_dir, self.name);
-                std::fs::write(filename, content)?;
+                std::fs::write(child, content)?;
             }
             GitObjectContent::Tree { content } => {
                 for tree_child in content {
-                    let new_parent_dir = format!("{}/{}", parent_dir, self.name);
-                    tree_child.restore_content(&new_parent_dir)?;
+                    tree_child.restore_content(&child)?;
                 }
             }
             _ => Err(Error::InvalidGitObject)?,
@@ -176,15 +176,17 @@ impl GitObject {
         format!("{digest:x}")
     }
 
-    pub fn from_hash(hash: &str, repo_directory: &str) -> Result<Self> {
+    pub fn from_hash<P: AsRef<Path> + ?Sized>(
+        hash: &str,
+        repository_directory: &P,
+    ) -> Result<Self> {
         if hash.len() != 40 {
             Err(Error::InvalidHash(hash.to_owned()))?;
         }
         let (subdir, filename) = hash.split_at(2);
 
-        let location: PathBuf = [repo_directory, ".git", "objects", subdir, filename]
-            .iter()
-            .collect();
+        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
+        let location = repository_directory.as_ref().join(location);
 
         let file = File::open(location)?;
 
@@ -215,8 +217,10 @@ impl GitObject {
                         None => break,
                         Some(mut tree_child) => {
                             // loads the underlying git object
-                            tree_child.git_object =
-                                Some(GitObject::from_hash(&tree_child.hash, repo_directory)?);
+                            tree_child.git_object = Some(GitObject::from_hash(
+                                &tree_child.hash,
+                                repository_directory,
+                            )?);
                             content.push(tree_child);
                         }
                     }
@@ -460,12 +464,15 @@ impl GitObject {
         })
     }
 
-    pub fn write(&self, repository_directory: &str, recursive: bool) -> Result<()> {
+    pub fn write<P: AsRef<Path> + ?Sized>(
+        &self,
+        repository_directory: &P,
+        recursive: bool,
+    ) -> Result<()> {
         let (subdir, filename) = self.hash.split_at(2);
 
-        let location: PathBuf = [repository_directory, ".git", "objects", subdir, filename]
-            .iter()
-            .collect();
+        let location: PathBuf = [".git", "objects", subdir, filename].iter().collect();
+        let location = repository_directory.as_ref().join(location);
 
         let parent = location.parent().ok_or_else(|| Error::InvalidGitObject)?;
         create_dir_all(parent)?;
@@ -490,7 +497,7 @@ impl GitObject {
                         .git_object
                         .as_ref()
                         .ok_or_else(|| Error::TreeChildNotLoaded)?
-                        .write(&repository_directory, true)?;
+                        .write(repository_directory, true)?;
                 }
             }
         }
