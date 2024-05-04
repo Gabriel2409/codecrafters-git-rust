@@ -32,6 +32,7 @@ pub enum Error {
         got: usize,
     },
     ObjectNotFound(String),
+    CantBuildFromRefDelta,
     // -- Externals
     #[from]
     Io(std::io::Error),

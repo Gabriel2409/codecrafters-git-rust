@@ -36,14 +36,14 @@ pub struct UploadPackDiscovery {
     pub refs: Vec<(String, String)>,
 }
 impl UploadPackDiscovery {
+    /// Writes the commit HEAD points to to the HEAD file and all the references in the
     pub fn write_head_and_refs<P: AsRef<Path> + ?Sized>(&self, repo_dir: &P) -> Result<()> {
         let git_dir = repo_dir.as_ref().join(".git");
         let head_file = git_dir.join("HEAD");
 
         std::fs::write(head_file, self.head_hash.clone())?;
         for (hash, name) in &self.refs {
-            // Note: name can contain slash
-            // TODO: make windows resilient?
+            // Note: name can contain slash and  starts with refs/
             let filename = git_dir.join(name);
             let parent = std::path::Path::new(&filename).parent().unwrap();
             std::fs::create_dir_all(parent)?;
@@ -109,7 +109,7 @@ impl UploadPackDiscovery {
             });
         };
 
-        // 001e # service=git-upload-pack\n
+        // First part of response:  001e # service=git-upload-pack\n
 
         let initial_size = Self::get_line_size(&mut res)?;
         let initial_content = Self::get_line_content(&mut res, initial_size)?;
@@ -121,27 +121,28 @@ impl UploadPackDiscovery {
             });
         }
 
-        // 0000
+        // next part of response: 0000
         let zero_size = Self::get_line_size(&mut res)?;
         if zero_size != 0 {
             return Err(Error::InvalidSmartHttpRes);
         }
 
+        // next part of response looks like:
+        // 004895dcfa3633004da0049d3d0fa03f80589cbcaf31 HEAD\0multi_ack thin-pack side-band\n
         let big_size = Self::get_line_size(&mut res)?;
         let big_content = Self::get_line_content(&mut res, big_size)?;
 
-        // 004895dcfa3633004da0049d3d0fa03f80589cbcaf31 HEAD\0multi_ack thin-pack side-band\n
         let (head, tail) = big_content
             .split_once('\0')
             .ok_or_else(|| Error::InvalidSmartHttpRes)?;
 
-        // sometimes we have HEAD before \0, sometimes we have refs/heads/maint
+        // sometimes we have HEAD before \0, sometimes we have refs/heads/main
 
         let head_hash = head[..40].to_owned();
 
+        // Not sure what to do with the parameters
         let parameters = tail.split(' ').map(|v| v.to_string()).collect::<Vec<_>>();
 
-        // Not sure I actually need them.
         // other rows only contain hash and ref
         let mut refs = Vec::new();
         loop {
@@ -169,26 +170,45 @@ impl UploadPackDiscovery {
 }
 
 #[derive(Debug)]
+/// Object type is encoded on 3 bits after the Most Significant Bit
 pub enum GitPackObject {
-    // - OBJ_COMMIT (1) - OBJ_TREE (2) - OBJ_BLOB (3) - OBJ_TAG (4) - OBJ_OFS_DELTA (6) - OBJ_REF_DELTA (7)
-    Commit {
-        content_bytes: Vec<u8>,
-    },
-    Tree {
-        content_bytes: Vec<u8>,
-    },
-    Blob {
-        content_bytes: Vec<u8>,
-    },
-    Tag {
-        content_bytes: Vec<u8>,
-    },
+    ///  OBJ_COMMIT (1)
+    Commit { content_bytes: Vec<u8> },
+    /// OBJ_TREE (2)
+    Tree { content_bytes: Vec<u8> },
+    /// OBJ_BLOB (3)
+    Blob { content_bytes: Vec<u8> },
+    /// OBJ_TAG (4)
+    Tag { content_bytes: Vec<u8> },
+    /// OBJ_REF_DELTA (7)
     RefDelta {
         base_object_hash: String,
         // base_object_size: usize,
         // reconstructed_object_size: usize,
         content_bytes: Vec<u8>,
     },
+    // OBJ_OFS_DELTA (6) - Not supported
+}
+
+impl GitPackObject {
+    /// consumes the pack object and creates a git_object
+    // Only works for self contained pack objects
+    pub fn into_git_object(self) -> Result<GitObject> {
+        let git_object = match self {
+            GitPackObject::Commit { content_bytes } => {
+                GitObject::from_blob_content_bytes(content_bytes)?
+            }
+            GitPackObject::Tree { content_bytes } => {
+                GitObject::from_tree_content_bytes(content_bytes)?
+            }
+            GitPackObject::Blob { content_bytes } => {
+                GitObject::from_commit_content_bytes(content_bytes)?
+            }
+            GitPackObject::Tag { .. } => todo!(),
+            GitPackObject::RefDelta { .. } => Err(Error::CantBuildFromRefDelta)?,
+        };
+        Ok(git_object)
+    }
 }
 
 #[derive(Debug)]
@@ -197,6 +217,11 @@ pub struct GitPack {
 }
 impl GitPack {
     /// creates the most minimal pack content to send
+    /// 0032 = size
+    /// want {head_hash} \n = sequence to send
+    /// 0000 = separator
+    /// 0009 = size
+    /// done\n = instruction end
     /// used in git clone
     pub fn create_minimal_pack_content_from_head_hash(head_hash: &str) -> String {
         format!("0032want {}\n00000009done\n", head_hash).to_string()
