@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader, Read, SeekFrom},
+    io::{BufRead, BufReader, Read},
     path::Path,
 };
 
@@ -190,27 +190,6 @@ pub enum GitPackObject {
     // OBJ_OFS_DELTA (6) - Not supported
 }
 
-impl GitPackObject {
-    /// consumes the pack object and creates a git_object
-    // Only works for self contained pack objects
-    pub fn into_git_object(self) -> Result<GitObject> {
-        let git_object = match self {
-            GitPackObject::Commit { content_bytes } => {
-                GitObject::from_blob_content_bytes(content_bytes)?
-            }
-            GitPackObject::Tree { content_bytes } => {
-                GitObject::from_tree_content_bytes(content_bytes)?
-            }
-            GitPackObject::Blob { content_bytes } => {
-                GitObject::from_commit_content_bytes(content_bytes)?
-            }
-            GitPackObject::Tag { .. } => todo!(),
-            GitPackObject::RefDelta { .. } => Err(Error::CantBuildFromRefDelta)?,
-        };
-        Ok(git_object)
-    }
-}
-
 #[derive(Debug)]
 pub struct GitPack {
     pack_objects: Vec<GitPackObject>,
@@ -347,7 +326,7 @@ impl GitPack {
                         2 => GitPackObject::Tree { content_bytes: buf },
                         3 => GitPackObject::Blob { content_bytes: buf },
                         4 => GitPackObject::Tag { content_bytes: buf },
-                        _ => panic!("Pattern is unreachable"), // unreachable
+                        _ => Err(Error::Unreachable)?,
                     };
                     pack_objects.push(git_pack_object);
 
@@ -391,10 +370,7 @@ impl GitPack {
     /// Writes the pack to .git directory.
     /// Note that contrary to what is done in git, all objects are unpacked so there
     /// is no pack folder in the objects folder
-    pub fn write<P: AsRef<Path> + ?Sized>(
-        self,
-        repository_directory: &P,
-    ) -> Result<Vec<GitObject>> {
+    pub fn into_git_objects(self) -> Result<Vec<GitObject>> {
         let mut obj_map = HashMap::<String, usize>::new();
 
         let mut git_objects = Vec::new();
@@ -404,19 +380,16 @@ impl GitPack {
                 GitPackObject::Blob { content_bytes } => {
                     let git_object = GitObject::from_blob_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tree { content_bytes } => {
                     let git_object = GitObject::from_tree_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Commit { content_bytes } => {
                     let git_object = GitObject::from_commit_content_bytes(content_bytes)?;
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
                 GitPackObject::Tag { .. } => {
@@ -515,7 +488,6 @@ impl GitPack {
                         });
                     }
                     obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_object.write(repository_directory, false)?;
                     git_objects.push(git_object);
                 }
             }
