@@ -427,6 +427,11 @@ impl GitPack {
 
                         if instruction == 0 {
                             let size = first_byte as usize;
+                            // The size must be non-zero
+                            // see https://github.com/git/git/blob/795ea8776befc95ea2becd8020c7a284677b4161/Documentation/gitformat-pack.txt
+                            if size == 0 {
+                                Err(Error::InvalidPackFile)?;
+                            }
 
                             let mut data = vec![0; size];
 
@@ -452,6 +457,11 @@ impl GitPack {
 
                                     size += (buffer[0] as usize) << (8 * i);
                                 }
+                            }
+                            // There is another exception: size zero is automatically converted to 0x10000
+                            // see https://github.com/git/git/blob/795ea8776befc95ea2becd8020c7a284677b4161/Documentation/gitformat-pack.txt
+                            if size == 0 {
+                                size = 0x10000;
                             }
 
                             let mut base_reader = BufReader::new(&base_bytes[..]);
