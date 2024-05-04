@@ -12,9 +12,22 @@ use crate::{Error, Result};
 #[derive(Debug)]
 /// Content of a given GitObject
 pub enum GitObjectContent {
-    Blob { content: String },
-    Tree { content: Vec<TreeChild> },
-    Commit { content: CommitObjects },
+    Blob {
+        content: String,
+    },
+    Tree {
+        content: Vec<TreeChild>,
+    },
+    Commit {
+        content: CommitObjects,
+    },
+    /// only annotated tags are stored as objects
+    Tag {
+        /// For now we stores the full content as a string
+        /// but we could do like the commit object and store it as
+        /// its constituents
+        content: String,
+    },
 }
 
 /// Tree points to a git object but also have additional information
@@ -185,15 +198,47 @@ impl GitObject {
         format!("{digest:x}")
     }
 
+    pub fn find_hash_branch_or_tag_points_to<P: AsRef<Path> + ?Sized>(
+        name: &str,
+        repository_directory: &P,
+    ) -> Result<String> {
+        let branch_location: PathBuf = [".git", "refs", "heads", name].iter().collect();
+        let branch_location = repository_directory.as_ref().join(branch_location);
+
+        let tag_location: PathBuf = [".git", "refs", "tags", name].iter().collect();
+        let tag_location = repository_directory.as_ref().join(tag_location);
+
+        let location = if branch_location.exists() {
+            branch_location
+        } else if tag_location.exists() {
+            tag_location
+        } else {
+            return Err(Error::InvalidBranchOrTag);
+        };
+
+        let mut content = std::fs::read_to_string(location)?;
+        // removes the \n
+        content.pop();
+
+        Ok(content)
+    }
+
     /// Create a git object based on the hash in hexadecimal format.
     /// Under the hood, locates the file in the .git/objects folder of the
     /// repository_directory
+    /// Note: If given hash is not 40 chars, we instead try to get it from branch ref
+    /// first and tag second
     pub fn from_hash<P: AsRef<Path> + ?Sized>(
         hash: &str,
         repository_directory: &P,
     ) -> Result<Self> {
         if hash.len() != 40 {
-            Err(Error::InvalidHash(hash.to_owned()))?;
+            let hash = Self::find_hash_branch_or_tag_points_to(hash, repository_directory)?;
+            if hash.len() != 40 {
+                Err(Error::InvalidHash(hash.clone()))?;
+            }
+
+            return Self::from_hash(&hash, repository_directory);
         }
         let (subdir, filename) = hash.split_at(2);
 
@@ -269,6 +314,19 @@ impl GitObject {
                     },
                 })
             }
+
+            "tag" => {
+                let mut content = String::new();
+                reader.read_to_string(&mut content)?;
+                Ok(GitObject {
+                    size,
+                    content: GitObjectContent::Tag { content },
+                    hash: hash.to_string(),
+                    object_bytes: None,
+                })
+            }
+
+            // are there actually other objects?
             _ => todo!(),
         }
     }
@@ -342,6 +400,26 @@ impl GitObject {
             content: GitObjectContent::Commit {
                 content: commit_objects,
             },
+            size,
+        })
+    }
+
+    /// Creates a tag object from content bytes (header not included)
+    pub fn from_tag_content_bytes(content_bytes: Vec<u8>) -> Result<Self> {
+        let size = content_bytes.len();
+
+        let header = format!("tag {}", size);
+        let mut object_bytes = header.as_bytes().to_vec();
+        object_bytes.push(0);
+        object_bytes.extend(&content_bytes);
+
+        let hash = GitObject::get_hash_from_bytes(&object_bytes);
+        let content = String::from_utf8(content_bytes).map_err(|_| Error::InvalidSmartHttpRes)?;
+
+        Ok(GitObject {
+            object_bytes: Some(object_bytes),
+            hash,
+            content: GitObjectContent::Tag { content },
             size,
         })
     }
@@ -544,6 +622,7 @@ impl GitObject {
             GitObjectContent::Blob { .. } => "blob".to_owned(),
             GitObjectContent::Tree { .. } => "tree".to_owned(),
             GitObjectContent::Commit { .. } => "commit".to_owned(),
+            GitObjectContent::Tag { .. } => "tag".to_owned(),
         }
     }
 }

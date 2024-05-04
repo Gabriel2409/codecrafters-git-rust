@@ -373,28 +373,23 @@ impl GitPack {
     pub fn into_git_objects(self) -> Result<Vec<GitObject>> {
         let mut obj_map = HashMap::<String, usize>::new();
 
-        let mut git_objects = Vec::new();
+        let mut git_objects: Vec<GitObject> = Vec::new();
 
         for git_pack_object in self.pack_objects {
-            match git_pack_object {
+            let git_object = match git_pack_object {
                 GitPackObject::Blob { content_bytes } => {
-                    let git_object = GitObject::from_blob_content_bytes(content_bytes)?;
-                    obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_objects.push(git_object);
+                    GitObject::from_blob_content_bytes(content_bytes)?
                 }
                 GitPackObject::Tree { content_bytes } => {
-                    let git_object = GitObject::from_tree_content_bytes(content_bytes)?;
-                    obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_objects.push(git_object);
+                    GitObject::from_tree_content_bytes(content_bytes)?
                 }
                 GitPackObject::Commit { content_bytes } => {
-                    let git_object = GitObject::from_commit_content_bytes(content_bytes)?;
-                    obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_objects.push(git_object);
+                    GitObject::from_commit_content_bytes(content_bytes)?
                 }
-                GitPackObject::Tag { .. } => {
-                    println!("tag not supported");
+                GitPackObject::Tag { content_bytes } => {
+                    GitObject::from_tag_content_bytes(content_bytes)?
                 }
+                // TODO: refactor in own function
                 GitPackObject::RefDelta {
                     base_object_hash,
                     content_bytes,
@@ -480,6 +475,9 @@ impl GitPack {
                         GitObjectContent::Commit { .. } => {
                             GitObject::from_commit_content_bytes(reconstructed_content)?
                         }
+                        GitObjectContent::Tag { .. } => {
+                            GitObject::from_tag_content_bytes(reconstructed_content)?
+                        }
                     };
                     if git_object.size != reconstructed_object_size {
                         return Err(Error::WrongObjectSize {
@@ -487,10 +485,11 @@ impl GitPack {
                             got: git_object.size,
                         });
                     }
-                    obj_map.insert(git_object.hash.clone(), git_objects.len());
-                    git_objects.push(git_object);
+                    git_object
                 }
-            }
+            };
+            obj_map.insert(git_object.hash.clone(), git_objects.len());
+            git_objects.push(git_object);
         }
         Ok(git_objects)
     }

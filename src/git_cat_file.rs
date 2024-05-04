@@ -57,6 +57,7 @@ pub fn git_cat_file(
                 }
             }
             GitObjectContent::Blob { content } => print!("{}", content),
+            GitObjectContent::Tag { content } => print!("{}", content),
         }
     } else if size {
         println!("{}", git_obj.size)
