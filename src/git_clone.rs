@@ -17,7 +17,7 @@ pub fn git_clone<P: AsRef<Path> + ?Sized>(repository_url: &str, directory: &P) -
         GitPack::create_minimal_pack_content_from_head_hash(&upload_pack_discovery.head_hash);
     let git_pack = GitPack::from_repository_url_and_pack_content(repository_url, &pack_content)?;
 
-    let git_objects = git_pack.into_git_objects(directory)?;
+    git_pack.write(directory)?;
 
     let current_commit_object =
         GitObject::from_hash(&upload_pack_discovery.head_hash, directory)?.content;

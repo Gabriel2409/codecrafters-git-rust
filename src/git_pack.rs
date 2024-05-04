@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader, Read},
+    io::{BufRead, BufReader, Read, SeekFrom},
     path::Path,
 };
 
@@ -377,11 +377,21 @@ impl GitPack {
                 x => Err(Error::InvalidPackObjectType(x))?,
             }
         }
-        // TODO:Add checksum validation
+        let mut buf = Vec::new();
+        reader.read_to_end(&mut buf)?;
+        if buf.len() != 20 {
+            // TODO:Add checksum validation
+            // I am not sure how the checksum is calculated for packfiles
+            Err(Error::InvalidPackFile)?
+        }
+
         Ok(GitPack { pack_objects })
     }
 
-    pub fn into_git_objects<P: AsRef<Path> + ?Sized>(
+    /// Writes the pack to .git directory.
+    /// Note that contrary to what is done in git, all objects are unpacked so there
+    /// is no pack folder in the objects folder
+    pub fn write<P: AsRef<Path> + ?Sized>(
         self,
         repository_directory: &P,
     ) -> Result<Vec<GitObject>> {

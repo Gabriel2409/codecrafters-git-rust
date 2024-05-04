@@ -33,6 +33,7 @@ pub enum Error {
     },
     ObjectNotFound(String),
     CantBuildFromRefDelta,
+    InvalidPackFile,
     // -- Externals
     #[from]
     Io(std::io::Error),
